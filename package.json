@@ -1,0 +1,29 @@
+{
+  "name": "dev-flow-ai-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Monorepo for DevFlow AI application, web frontend, local agent, and Supabase functions.",
+  "scripts": {
+    "dev": "npm run dev --workspace=@dev-flow-ai/web",
+    "build": "npm run build --workspace=@dev-flow-ai/web",
+    "lint": "npm run lint --workspace=@dev-flow-ai/web",
+    "local-agent": "echo \"Local agent CLI not yet implemented. Define in packages/local-agent-cli/package.json and add script here.\"",
+    "supabase:start": "echo \"Ensure Supabase CLI is installed. Run: supabase start\"",
+    "supabase:deploy": "echo \"Ensure Supabase CLI is installed. Run: supabase functions deploy --project-ref <YOUR-PROJECT-REF>\""
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "keywords": [
+    "ai",
+    "developer-tools",
+    "kanban",
+    "github",
+    "mcp",
+    "supabase",
+    "react"
+  ],
+  "author": "",
+  "license": "ISC"
+}

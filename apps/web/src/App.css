@@ -1,0 +1,75 @@
+
+/* Global app layout styles */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+@media (min-width: 768px) {
+  .app-layout {
+    flex-direction: row;
+  }
+}
+
+.main-content {
+  flex: 1;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Kanban board styles for Project view */
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+  padding: 1rem 0;
+}
+
+.kanban-column {
+  background-color: hsl(var(--background));
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  padding: 1rem;
+  min-height: 300px;
+}
+
+@media (min-width: 1024px) {
+  .kanban-board {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Context indicator styles */
+.context-indicator {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.context-personal {
+  background-color: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+}
+
+.context-organization {
+  background-color: hsl(var(--secondary) / 0.1);
+  color: hsl(var(--secondary));
+}
+
+/* Status and priority colors */
+:root {
+  --status-not-started: 215 25% 27%;
+  --status-in-progress: 215 90% 60%;
+  --status-completed: 142 71% 45%;
+  
+  --priority-low: 142 71% 45%;
+  --priority-medium: 47 100% 60%;
+  --priority-high: 0 100% 65%;
+}
+
+/* ... keep existing code (status and priority color classes) */
