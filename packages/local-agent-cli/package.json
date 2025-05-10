@@ -1,0 +1,24 @@
+{
+  "name": "@devflow-ai/local-agent-cli",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Local agent CLI for DevFlow AI to interact with user's codebase via MCP.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mcp",
+    "ai",
+    "devflow",
+    "agent",
+    "cli"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "commander": "^12.0.0",
+    "dotenv": "^16.4.5"
+  }
+}

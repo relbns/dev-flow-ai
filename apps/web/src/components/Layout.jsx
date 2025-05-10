@@ -1,12 +1,15 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import CommandPalette from './CommandPalette';
+import { supabase } from '../lib/supabaseClient';
+import { Toaster } from '@/components/ui/toaster'; // Import Toaster
 
 const Layout = () => {
-  const [collapsed, setCollapsed] = useState(false); // Added collapsed state
+  const [collapsed, setCollapsed] = useState(false);
+  const [session, setSession] = useState(null);
   const [contextType, setContextType] = useState('personal');
   const [organization, setOrganization] = useState(null);
   const [organizations, setOrganizations] = useState([
@@ -15,6 +18,20 @@ const Layout = () => {
     { id: 'org3', name: 'Mobile Dev Group' },
   ]);
   const location = useLocation();
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const handleContextChange = (type, orgData = null) => {
     setContextType(type);
@@ -46,6 +63,7 @@ const Layout = () => {
             organization={organization}
             organizations={organizations}
             onContextChange={handleContextChange}
+            session={session} // Pass session to Header
           />
           <main className="flex-1 overflow-auto">
             <Outlet />
@@ -53,6 +71,7 @@ const Layout = () => {
         </div>
       </div>
       <CommandPalette />
+      <Toaster /> {/* Add Toaster here for global toasts */}
     </div>
   );
 };

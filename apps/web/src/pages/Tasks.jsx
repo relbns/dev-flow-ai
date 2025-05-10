@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import TaskCard from '@/components/TaskCard';
 import { useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
@@ -10,93 +9,129 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
+  // DropdownMenuSeparator, // Not used for status-only filter
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { supabase } from '@/lib/supabaseClient';
+import { useToast } from "@/hooks/use-toast";
+import { formatDistanceToNow, parseISO } from 'date-fns';
 
 const Tasks = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
+  // Priority filter removed for V1 as 'priority' is not in tasks table yet
 
-  // Mock tasks data - in a real app, this would come from an API or state management
-  const tasks = [
-    {
-      id: '1',
-      title: 'Implement authentication middleware',
-      description: 'Create JWT-based authentication middleware for the API with proper error handling and token validation.',
-      status: 'inProgress',
-      priority: 'high',
-      dueDate: 'May 5, 2025',
-      assignee: {
-        name: 'John Smith',
-        avatar: ''
-      },
-      projectName: 'API Development',
-      comments: 3
-    },
-    {
-      id: '2',
-      title: 'Design dashboard UI components',
-      description: 'Create reusable UI components for the main dashboard following the design system guidelines.',
-      status: 'notStarted',
-      priority: 'medium',
-      dueDate: 'May 10, 2025',
-      assignee: {
-        name: 'John Smith',
-        avatar: ''
-      },
-      projectName: 'Frontend Redesign',
-      comments: 1
-    },
-    {
-      id: '3',
-      title: 'Fix responsive layout issues',
-      description: 'Address responsive layout problems on mobile devices for the project overview page.',
-      status: 'inProgress',
-      priority: 'high',
-      dueDate: 'May 3, 2025',
-      assignee: {
-        name: 'John Smith',
-        avatar: ''
-      },
-      projectName: 'Frontend Redesign',
-      comments: 0
-    }
-  ];
+  const [allTasks, setAllTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchUserTasks = async () => {
+      setLoading(true);
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session?.user) {
+        toast({ title: "Error", description: "User not authenticated. Please log in.", variant: "destructive" });
+        setAllTasks([]); // Clear tasks if not authenticated
+        setLoading(false);
+        navigate('/'); // Redirect to home or login page
+        return;
+      }
+      const userId = session.user.id;
+
+      try {
+        // Fetch tasks from projects owned by the user
+        const { data, error } = await supabase
+          .from('tasks')
+          .select('*, projects!inner(user_id, name)') // !inner join to ensure tasks belong to a project
+          .eq('projects.user_id', userId) // Filter by projects owned by the current user
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        const formattedTasks = data.map(task => ({
+          ...task,
+          projectName: task.projects?.name || 'N/A',
+          // Add placeholders for TaskCard compatibility
+          assignee: { name: 'Unassigned', avatar: '' }, 
+          comments: 0, 
+          priority: 'medium', // Placeholder
+          // Use updated_at for dueDate display as a proxy
+          dueDate: task.updated_at ? formatDistanceToNow(parseISO(task.updated_at), { addSuffix: true }) : 'N/A' 
+        }));
+        setAllTasks(formattedTasks || []);
+      } catch (err) {
+        console.error('Error fetching tasks:', err);
+        toast({ title: "Error Fetching Tasks", description: err.message, variant: "destructive" });
+        setAllTasks([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchUserTasks();
+  }, [toast, navigate]); // Added navigate to dependency array
 
   const handleTaskClick = (taskId) => {
+    // Navigate to TaskDetail page using only the taskId.
+    // TaskDetailPage will fetch all necessary details, including project_id.
     navigate(`/tasks/${taskId}`);
   };
 
-  // Filter tasks based on search query and status filter
-  const filteredTasks = tasks.filter(task => {
-    const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.projectName.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredTasks = allTasks.filter(task => {
+    const searchLower = searchQuery.toLowerCase();
+    const matchesSearch = task.title.toLowerCase().includes(searchLower) ||
+      (task.description && task.description.toLowerCase().includes(searchLower)) ||
+      (task.projectName && task.projectName.toLowerCase().includes(searchLower));
     
-    const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
-    const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
-
-    return matchesSearch && matchesStatus && matchesPriority;
+    let matchesStatus = true;
+    if (statusFilter !== 'all') {
+        if (statusFilter === 'notStarted') {
+            matchesStatus = task.status === 'Backlog' || task.status === 'To Do';
+        } else if (statusFilter === 'inProgress') {
+            matchesStatus = task.status === 'In Progress';
+        } else if (statusFilter === 'completed') {
+            matchesStatus = task.status === 'Done' || task.status === 'In Review';
+        } 
+        // Removed direct task.status === statusFilter as it might not match grouped categories
+    }
+    return matchesSearch && matchesStatus;
   });
 
-  const getFilteredTasksByStatus = (status) => {
-    // Now, filteredTasks already considers all filters, so just filter by the requested status for grouping
-    return filteredTasks.filter(task => task.status === status);
+  const getTasksByGroup = (group) => {
+    if (group === 'inProgress') {
+      return filteredTasks.filter(task => task.status === 'In Progress');
+    }
+    if (group === 'notStarted') {
+      return filteredTasks.filter(task => task.status === 'Backlog' || task.status === 'To Do');
+    }
+    if (group === 'completed') {
+      return filteredTasks.filter(task => task.status === 'Done' || task.status === 'In Review');
+    }
+    return [];
   };
+  
+  const taskGroups = [
+    { title: 'In Progress', statusKey: 'inProgress', tasks: getTasksByGroup('inProgress') },
+    { title: 'Not Started', statusKey: 'notStarted', tasks: getTasksByGroup('notStarted') },
+    { title: 'Completed', statusKey: 'completed', tasks: getTasksByGroup('completed') },
+  ];
+
+
+  if (loading) {
+    return <div className="p-6 text-center">Loading tasks...</div>;
+  }
 
   return (
     <div className="flex flex-col h-full">
       <div className="bg-background border-b border-border px-6 py-3">
         <div className="flex items-center justify-between flex-wrap gap-4">
+          <h1 className="text-xl font-semibold">My Tasks</h1>
           <div className="flex-grow max-w-md">
             <div className="relative w-full">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 type="search"
-                placeholder="Search tasks..."
+                placeholder="Search tasks by title, description, project..."
                 className="pl-9 bg-secondary"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -109,67 +144,19 @@ const Tasks = () => {
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2">
                   <Filter className="h-4 w-4" />
-                  <span>Filter</span>
+                  <span>Filter by Status</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>Status</DropdownMenuLabel>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => setStatusFilter('all')}
-                >
-                  All
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => setStatusFilter('notStarted')}
-                >
-                  Not Started
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => setStatusFilter('inProgress')}
-                >
-                  In Progress
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => setStatusFilter('completed')}
-                >
-                  Completed
-                </DropdownMenuItem>
-                
-                <DropdownMenuSeparator />
-                
-                <DropdownMenuLabel>Priority</DropdownMenuLabel>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => setPriorityFilter('all')}
-                >
-                  All
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => setPriorityFilter('high')}
-                >
-                  High
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => setPriorityFilter('medium')}
-                >
-                  Medium
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => setPriorityFilter('low')}
-                >
-                  Low
-                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer" onClick={() => setStatusFilter('all')}>All Tasks</DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer" onClick={() => setStatusFilter('notStarted')}>Not Started</DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer" onClick={() => setStatusFilter('inProgress')}>In Progress</DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer" onClick={() => setStatusFilter('completed')}>Completed</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             
-            <Button variant="default" size="sm">
+            <Button variant="default" size="sm" disabled title="Create tasks from within a specific project.">
               Add Task
             </Button>
           </div>
@@ -177,43 +164,30 @@ const Tasks = () => {
       </div>
       
       <div className="flex-1 p-6 overflow-auto">
-        <div className="grid grid-cols-1 gap-6">
-          <div>
-            <h2 className="text-lg font-semibold mb-3">In Progress</h2>
-            <div className="space-y-3">
-              {getFilteredTasksByStatus('inProgress').map(task => (
-                <TaskCard key={task.id} task={task} onClick={handleTaskClick} />
-              ))}
-              {getFilteredTasksByStatus('inProgress').length === 0 && (
-                <p className="text-muted-foreground text-sm">No tasks in progress</p>
-              )}
-            </div>
+        {filteredTasks.length === 0 && !loading && (
+          <p className="text-muted-foreground text-center py-10">
+            No tasks match your current filters. Try adjusting search or status filters.
+          </p>
+        )}
+        {allTasks.length > 0 && filteredTasks.length > 0 && (
+          <div className="space-y-8">
+            {taskGroups.map(group => (
+              group.tasks.length > 0 && (
+                <div key={group.statusKey}>
+                  <h2 className="text-lg font-semibold mb-3">{group.title} ({group.tasks.length})</h2>
+                  <div className="space-y-3">
+                    {group.tasks.map(task => (
+                      <TaskCard key={task.id} task={task} onClick={() => handleTaskClick(task.id)} />
+                    ))}
+                  </div>
+                </div>
+              )
+            ))}
           </div>
-          
-          <div>
-            <h2 className="text-lg font-semibold mb-3">Not Started</h2>
-            <div className="space-y-3">
-              {getFilteredTasksByStatus('notStarted').map(task => (
-                <TaskCard key={task.id} task={task} onClick={handleTaskClick} />
-              ))}
-              {getFilteredTasksByStatus('notStarted').length === 0 && (
-                <p className="text-muted-foreground text-sm">No tasks to start</p>
-              )}
-            </div>
-          </div>
-          
-          <div>
-            <h2 className="text-lg font-semibold mb-3">Completed</h2>
-            <div className="space-y-3">
-              {getFilteredTasksByStatus('completed').map(task => (
-                <TaskCard key={task.id} task={task} onClick={handleTaskClick} />
-              ))}
-              {getFilteredTasksByStatus('completed').length === 0 && (
-                <p className="text-muted-foreground text-sm">No completed tasks</p>
-              )}
-            </div>
-          </div>
-        </div>
+        )}
+         {allTasks.length === 0 && !loading && (
+          <p className="text-muted-foreground text-center py-10">You have no tasks yet.</p>
+        )}
       </div>
     </div>
   );

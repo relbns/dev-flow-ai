@@ -10,15 +10,53 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Bell, User, Building, ChevronLeft } from 'lucide-react';
+import { Bell, User, Building, ChevronLeft, LogIn } from 'lucide-react'; // Added LogIn
 import ThemeToggle from './ThemeToggle';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from '../lib/supabaseClient'; // Import supabase
 
-const Header = ({ title, contextType, organization, organizations = [], onContextChange }) => {
+const Header = ({ title, contextType, organization, organizations = [], onContextChange, session }) => { // Added session prop
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+
+  async function handleLoginWithGitHub() {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'github',
+        options: {
+          scopes: 'repo user:email',
+          redirectTo: window.location.origin, // Redirect back to current page after login
+        },
+      });
+      if (error) throw error;
+    } catch (error) {
+      toast({
+        title: "Login Error",
+        description: error.error_description || error.message,
+        variant: "destructive",
+      });
+      console.error("Error logging in with GitHub:", error);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      // Session will be cleared by onAuthStateChange in Layout, no need to navigate here explicitly
+      // unless you want to force a redirect to a public page.
+      toast({ title: "Logged out", description: "You have been successfully logged out." });
+    } catch (error) {
+      toast({
+        title: "Logout Error",
+        description: error.error_description || error.message,
+        variant: "destructive",
+      });
+      console.error("Error logging out:", error);
+    }
+  }
   
   const handleBack = () => {
     // Go up one level in the hierarchy
@@ -149,25 +187,38 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
           {/* Theme Toggle */}
           <ThemeToggle />
           
-          {/* User Menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <User className="h-5 w-5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => navigate('/settings/profile')}>Profile</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate('/settings')}>Settings</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => {
-                toast({ title: "Logged out", description: "You have been logged out." });
-                navigate('/login');
-              }}>Log out</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* User Menu / Login Button */}
+          {session?.user ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  {session.user.user_metadata?.avatar_url ? (
+                    <img
+                      src={session.user.user_metadata.avatar_url}
+                      alt={session.user.user_metadata?.full_name || session.user.email}
+                      className="h-6 w-6 rounded-full"
+                    />
+                  ) : (
+                    <User className="h-5 w-5" />
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>
+                  {session.user.user_metadata?.full_name || session.user.email}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate('/settings/profile')}>Profile</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate('/settings')}>Settings</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout}>Log out</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button variant="outline" onClick={handleLoginWithGitHub}>
+              <LogIn className="mr-2 h-4 w-4" /> Login with GitHub
+            </Button>
+          )}
         </div>
       </div>
     </header>
