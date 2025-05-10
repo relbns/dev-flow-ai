@@ -34,7 +34,7 @@ function writeLocalFileContent(filePath, content, basePath) {
   return `Content successfully written to ${absolutePath}`;
 }
 
-function listLocalFiles(directoryPath, recursive = false, basePath) {
+function listLocalFiles(directoryPath, recursive = false, basePath, ignorePatterns = ['node_modules', '.git']) {
   const resolvedRootPathToList = path.resolve(basePath, directoryPath);
   if (!fs.existsSync(resolvedRootPathToList)) {
     throw new Error(`Directory not found at ${resolvedRootPathToList}`);
@@ -42,15 +42,21 @@ function listLocalFiles(directoryPath, recursive = false, basePath) {
   if (!fs.lstatSync(resolvedRootPathToList).isDirectory()) {
     throw new Error(`Path is not a directory: ${resolvedRootPathToList}`);
   }
+
   const filesOutput = [];
   const items = fs.readdirSync(resolvedRootPathToList, { withFileTypes: true });
+
   for (const item of items) {
     const itemName = item.name;
+    if (ignorePatterns.includes(itemName)) {
+      continue;
+    }
     const itemRelativePath = path.join(directoryPath, itemName);
+
     if (item.isDirectory()) {
       filesOutput.push({ name: itemName, type: 'directory', path: itemRelativePath.replace(/\\/g, '/') });
       if (recursive) {
-        const subFiles = listLocalFiles(itemRelativePath, true, basePath);
+        const subFiles = listLocalFiles(itemRelativePath, true, basePath, ignorePatterns); // Pass ignorePatterns
         filesOutput.push(...subFiles);
       }
     } else {
@@ -116,10 +122,12 @@ app.post('/mcp/write_local_file_content', (req, res) => {
   }
 });
 app.post('/mcp/list_local_files', (req, res) => {
-  const { directoryPath, recursive } = req.body;
+  const { directoryPath, recursive, ignore } = req.body; // `ignore` could be an array of patterns
   if (!directoryPath) return res.status(400).json({ error: 'directoryPath is required' });
   try {
-    const files = listLocalFiles(directoryPath, recursive || false, INITIAL_CWD);
+    // For now, hardcoded ignores are used in the utility.
+    // If `ignore` is provided in request, it could override/extend defaults in future.
+    const files = listLocalFiles(directoryPath, recursive || false, INITIAL_CWD); 
     res.json({ directoryPath, recursive, files });
   } catch (error) {
     res.status(500).json({ error: stripAnsi(error.message) });
@@ -280,21 +288,8 @@ program
     }
   });
 
-// If no arguments are passed (e.g., just 'devflow-local-agent'), default to starting the server.
-// Commander's .action() on the program itself can serve as a default command.
-// However, we need to ensure it only runs if no other command was matched.
-// A common way is to check if a command was processed after parse.
 program.action(() => {
-    // This will be called if no subcommand is specified.
-    // We need to check if `process.argv` indicates that only the base command was run.
-    // `program.args` will be empty if no command arguments were left after parsing options.
-    // `program.processedArgs` (not a standard public API, but often available) might hold the command.
-    // A simpler check: if no command was explicitly run by Commander's own logic.
-    // Commander sets an internal flag or you can check if a command's action was triggered.
-    // For now, let's assume if `program.args` (unrecognized arguments) is empty AND no specific command was found in `process.argv`
-    // beyond the script itself, then we run the default.
-
-    const  args = process.argv.slice(2); // Get arguments passed to the script
+    const args = process.argv.slice(2);
     let commandExplicitlyCalled = false;
     program.commands.forEach(cmd => {
         if (args.includes(cmd.name())) {
@@ -303,28 +298,10 @@ program.action(() => {
     });
 
     if (!commandExplicitlyCalled && args.filter(arg => !arg.startsWith('-')).length === 0) {
-        // No command name found in args, and remaining args (if any) are only options
         startServerAction();
     } else if (!commandExplicitlyCalled && args.length === 0) {
-         // No arguments at all
         startServerAction();
     }
-    // If a command was called, its action would have run.
-    // If an unknown command was called, Commander shows help.
 });
 
 program.parse(process.argv);
-
-// Fallback if the above default action logic isn't perfect with all option combinations:
-// If after parsing, no command was actually executed by Commander (e.g. only options were passed without a command)
-// and the program is about to exit without doing anything, show help.
-// This is a bit tricky to get right with Commander's internal state.
-// The most reliable way for a default command is often to structure the CLI
-// such that `start-server` is the *only* command or to use a wrapper script.
-
-// For now, the .action() on program should handle the "no command" case.
-// If specific options are passed without a command, Commander typically shows help.
-// If an unknown command is passed, Commander shows help.
-// The previous `if (!process.argv.slice(2).length)` was too simple.
-// The logic in `program.action()` is an attempt to make `start-server` the default.
-// If it doesn't catch all "no command" scenarios perfectly, Commander's default help is a reasonable fallback.

@@ -165,7 +165,7 @@
 # 4. List Local Files (Non-recursive)
 # POST {{local_agent_url}}/list_local_files
 # Content-Type: application/json
-#
+
 # {
 #   "directoryPath": ".",
 #   "recursive": false
@@ -175,7 +175,7 @@
 # 4. List Local Files (Recursive)
 # POST {{local_agent_url}}/list_local_files
 # Content-Type: application/json
-#
+
 # {
 #   "directoryPath": "./apps",
 #   "recursive": true
