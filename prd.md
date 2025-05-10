@@ -53,9 +53,21 @@
   - AI agents can create, read, and update projects and tasks via the Supabase MCP Server.
   - AI agents can read/write local files and execute `git` commands via the Local MCP Server.
 
-**5. Supabase MCP Server - V1 Toolset (API Endpoints)** _(Hosted on Supabase Edge Functions, e.g., `/mcp/tool_name`)_ 1. `create_project(projectName: string, githubRepoURL: string, scopedPaths: [{name: string, path: string, notes: string}], guidelines: string[])` 2. `get_project_details(project_id: string)` (Returns project info, scoped paths, guidelines) 3. `list_projects()` 4. `create_task(project_id: string, title: string, description?: string, associated_scoped_path_name?: string)` 5. `get_task_details(task_id: string)` (Returns task info, status, linked branches/PRs) 6. `list_tasks(project_id: string, status_filter?: string, scoped_path_filter?: string)` 7. `update_task_status(task_id: string, new_status: string, current_branch?: string, pull_request_url?: string)` 8. `add_comment_to_task(task_id: string, comment_text: string, author: string)` (Author could be user or AI agent ID)
+**5. Supabase MCP Server - V1 Toolset (API Endpoints)** _(Hosted on Supabase Edge Functions, e.g., `/mcp/tool_name`)_
+1. `create_project(projectName: string, githubRepoURL: string, scopedPaths: [{name: string, path: string, notes: string}], guidelines: string[])`
+2. `get_project_details(project_id: string)` (Returns project info, scoped paths, guidelines)
+3. `list_projects()`
+4. `create_task(project_id: string, title: string, description?: string, associated_scoped_path_name?: string)`
+5. `get_task_details(task_id: string)` (Returns task info, status, linked branches/PRs)
+6. `list_tasks(project_id: string, status_filter?: string, scoped_path_filter?: string)`
+7. `update_task_status(task_id: string, new_status: string, current_branch?: string, pull_request_url?: string)`
+8. `add_comment_to_task(task_id: string, comment_text: string, author: string)` (Author could be user or AI agent ID)
 
-**6. Local MCP Server (Hosted by Local Agent CLI) - V1 Toolset (API Endpoints)** _(Hosted on `http://localhost:<port>`, e.g., `/mcp/tool_name`)_ 1. `get_local_file_content(filePath: string)` 2. `write_local_file_content(filePath: string, content: string)` 3. `execute_git_command(command_args: string[])` (e.g., `["checkout", "-b", "new-branch"]`, `["add", "."]`, `["commit", "-m", "message"]`, `["push"]`, `["status"]`, `["rev-parse", "--abbrev-ref", "HEAD"]` for current branch) 4. `list_local_files(directoryPath: string, recursive?: boolean)`
+**6. Local MCP Server (Hosted by Local Agent CLI) - V1 Toolset (API Endpoints)** _(Hosted on `http://localhost:<port>`, e.g., `/mcp/tool_name`)_
+1. `get_local_file_content(filePath: string)`
+2. `write_local_file_content(filePath: string, content: string)`
+3. `execute_git_command(command_args: string[])` (e.g., `["checkout", "-b", "new-branch"]`, `["add", "."]`, `["commit", "-m", "message"]`, `["push"]`, `["status"]`, `["rev-parse", "--abbrev-ref", "HEAD"]` for current branch)
+4. `list_local_files(directoryPath: string, recursive?: boolean)`
 
 **7. Database Schema - Initial Design (Supabase/PostgreSQL)**
 
@@ -72,4 +84,58 @@
 - **Backend & Database:** Supabase (PostgreSQL, Supabase Auth for GitHub OAuth, Supabase Edge Functions using JavaScript/TypeScript).
 - **Local Agent CLI:** Node.js (JavaScript/TypeScript).
 
-**9. V1 Implementation Order / Prioritization** 1. **Supabase Setup:** Initialize Supabase project, configure GitHub Auth (requesting `repo` scope), design and create initial DB tables based on schema above. 2. **Web App (Existing Frontend) - User Login:** Integrate Supabase Auth into the existing React app to enable "Login with GitHub." Store/retrieve user session. 3. **Web App (Existing Frontend) - Project Creation & Scoped Paths UI:** \* Develop React components/pages for users to create new projects. \* UI to input project name, GitHub repository URL. \* UI to define one or more "Scoped Paths" (name, path in repo, notes). \* UI to add project-level `guidelines`. \* Functionality to save this data to Supabase. 4. **Web App (Existing Frontend) - Task Creation UI:** \* Develop UI for creating tasks within a selected project. \* Input for title, description. \* Option to associate with a "Scoped Path" from the project. \* Save task data to Supabase (default status: "Backlog" or "To Do"). 5. **Supabase MCP Server - Core Implementation:** \* Implement initial Supabase Edge Functions for: `create_project`, `get_project_details`, `create_task`, `get_task_details`, `list_projects`, `list_tasks`. 6. **Local Agent (CLI) - V1:** \* Develop basic Node.js CLI tool. \* On startup, it launches a local HTTP server (e.g., using Express.js or Fastify). \* Implement Local MCP endpoints: `get_local_file_content`, `execute_git_command` (initially supporting `git status` and `git rev-parse --abbrev-ref HEAD`). \* User runs this CLI from the root of their local git repository. 7. **End-to-End Test (Conceptual/Manual):** \* Manually use a tool (Postman, curl) to call Supabase MCP: `create_project`, then `create_task`. \* Call Supabase MCP `get_task_details` to retrieve task info. \* Run the Local Agent CLI in a sample repository. \* Call Local MCP `get_local_file_content` for a file in that repo. \* Call Local MCP `execute_git_command` for `git status`. 8. **Web App (Existing Frontend) - Display & Workflow:** \* Develop UI to display projects and their tasks (e.g., simple list or basic Kanban board). \* Implement UI for users to manually change task statuses. \* Display task details, including associated Scoped Path, guidelines. 9. **Supabase MCP Server - Remaining V1 Tools:** Implement `update_task_status`, `add_comment_to_task`. 10. **Local Agent (CLI) - Expanded Git Commands:** Add support for `git checkout`, `add`, `commit`, `push` to `execute_git_command` in Local MCP. 11. **Refine & Test AI Workflow:** Test a more complete AI interaction flow.
+**9. V1 Implementation Order / Prioritization**
+1. **Supabase Setup:** Initialize Supabase project, configure GitHub Auth (requesting `repo` scope), design and create initial DB tables based on schema above.
+2. **Web App (Existing Frontend) - User Login:** Integrate Supabase Auth into the existing React app to enable "Login with GitHub." Store/retrieve user session.
+3. **Web App (Existing Frontend) - Project Creation & Scoped Paths UI:**
+   \* Develop React components/pages for users to create new projects.
+   \* UI to input project name, GitHub repository URL.
+   \* UI to define one or more "Scoped Paths" (name, path in repo, notes).
+   \* UI to add project-level `guidelines`.
+   \* Functionality to save this data to Supabase.
+4. **Web App (Existing Frontend) - Task Creation UI:**
+   \* Develop UI for creating tasks within a selected project.
+   \* Input for title, description.
+   \* Option to associate with a "Scoped Path" from the project.
+   \* Save task data to Supabase (default status: "Backlog" or "To Do").
+5. **Supabase MCP Server - Core Implementation:**
+   \* Implement initial Supabase Edge Functions for: `create_project`, `get_project_details`, `create_task`, `get_task_details`, `list_projects`, `list_tasks`.
+6. **Local Agent (CLI) - V1:**
+   \* Develop basic Node.js CLI tool.
+   \* On startup, it launches a local HTTP server (e.g., using Express.js or Fastify) on a configurable, less common port (e.g., default 52173).
+   \* Implement Local MCP endpoints: `get_local_file_content`, `write_local_file_content`, `list_local_files`, `execute_git_command` (initially supporting `git status` and `git rev-parse --abbrev-ref HEAD`).
+   \* User runs this CLI from the root of their local git repository.
+7. **End-to-End Test (Conceptual/Manual):**
+   \* Manually use a tool (Postman, curl, or `.http` file with VS Code REST Client extension) to call Supabase MCP: `create_project`, then `create_task`.
+   \* Call Supabase MCP `get_task_details` to retrieve task info.
+   \* Run the Local Agent CLI in a sample repository.
+   \* Call Local MCP `get_local_file_content` for a file in that repo.
+   \* Call Local MCP `execute_git_command` for `git status`.
+8. **Web App (Existing Frontend) - Display & Workflow:**
+   \* Develop UI to display projects and their tasks (e.g., simple list or basic Kanban board).
+   \* Implement UI for users to manually change task statuses.
+   \* Display task details, including associated Scoped Path, guidelines.
+9. **Supabase MCP Server - Remaining V1 Tools:** Implement `update_task_status`, `add_comment_to_task`.
+10. **Local Agent (CLI) - Expanded Git Commands:** Add support for `git checkout`, `add`, `commit`, `push` to `execute_git_command` in Local MCP, with appropriate safety considerations.
+11. **Refine & Test AI Workflow:** Test a more complete AI interaction flow.
+
+**10. Local Agent CLI - V1.1 Enhancements & Considerations (Post-V1)**
+
+*   **Cross-Platform Usability:** Continuously ensure CLI commands and file operations are robust across Linux, macOS, and Windows.
+*   **Enhanced Interactive CLI Experience:** For direct CLI use (not server mode), improve user experience with:
+    *   Colored output (e.g., using `chalk`).
+    *   Loading indicators/spinners for longer operations (e.g., using `ora`).
+    *   Interactive prompts for confirmation or input where appropriate (e.g., using `inquirer`).
+*   **Safety Mechanisms for Git Operations (MCP & Direct CLI):**
+    *   Implement confirmation prompts or "dry-run" options for potentially destructive git commands (especially `push`, `commit --amend`, `reset`).
+    *   Consider more granular permissions or scoping for AI agent capabilities via MCP.
+    *   Ensure `git push` operations are targeted and safe (e.g., only current task branch to its tracked remote).
+    *   Provide clear warnings for any "force" or "unsafe" modes.
+*   **Distribution via npm/npx:**
+    *   Configure `package.json` (`bin` field) for the `packages/local-agent-cli` to allow publishing to npm.
+    *   Enable users to run the agent via `npx @devflow-ai/local-agent-cli start-server`.
+*   **Secure Connection/Authentication for Local Agent:**
+    *   Design and implement a mechanism for the Local Agent to securely authenticate with the main DevFlow AI application/Supabase backend (e.g., API key/token generated by the user in the web app).
+    *   This token would be used if the Local Agent needs to make calls back to the Supabase MCP server (e.g., to report task progress after a local action).
+*   **Configuration File:** Consider a local configuration file (e.g., `.devflow-agent-config.json`) for settings like port, API tokens, default project paths, etc., to avoid relying solely on environment variables or CLI arguments for all settings.
+*   **Error Handling & Logging:** Improve error handling and provide clearer, more user-friendly error messages. Implement more structured logging for troubleshooting.

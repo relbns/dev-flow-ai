@@ -97,3 +97,86 @@
 #   "comment_text": "AI Agent: Starting work on this task. Will create a new branch 'feature/user-auth-ai-dev'.",
 #   "author": "AI-Agent-007" 
 # }
+
+### Local Agent MCP Server - V1 Toolset (Hosted by Local Agent CLI)
+@local_agent_url = http://localhost:52173/mcp
+
+### Get Local Agent Status
+GET {{local_agent_url}}/status
+
+
+###
+# 1. Get Local File Content
+POST {{local_agent_url}}/get_local_file_content
+Content-Type: application/json
+
+{
+  "filePath": "README.md"
+}
+
+###
+# POST {{local_agent_url}}/get_local_file_content
+# Content-Type: application/json
+#
+# {
+#   "filePath": "packages/local-agent-cli/package.json"
+# }
+
+###
+# 2. Write Local File Content (Not yet implemented in server, placeholder)
+# POST {{local_agent_url}}/write_local_file_content 
+# Content-Type: application/json
+#
+# {
+#   "filePath": "test-from-mcp.txt",
+#   "content": "Hello from Local MCP Server!"
+# }
+
+###
+# 3. Execute Git Command
+# POST {{local_agent_url}}/execute_git_command
+# Content-Type: application/json
+#
+# {
+#   "command_args": ["status"]
+# }
+
+###
+# POST {{local_agent_url}}/execute_git_command
+# Content-Type: application/json
+#
+# {
+#   "command_args": ["rev-parse", "--abbrev-ref", "HEAD"]
+# }
+
+###
+# (Example of a command that might be disallowed by current patterns if not quoted correctly in JSON)
+# POST {{local_agent_url}}/execute_git_command
+# Content-Type: application/json
+#
+# {
+#   "command_args": ["commit", "-m", "Test message with spaces"] 
+# }
+# Note: For commit messages with spaces, ensure the message is a single element in the array if your server logic expects that,
+# or handle joining appropriately. The current CLI pattern expects "commit -m \"Your message\"" as a single string effectively.
+# The MCP server endpoint takes `command_args` as an array, so `["commit", "-m", "My commit message"]` is fine.
+
+###
+# 4. List Local Files (Non-recursive)
+# POST {{local_agent_url}}/list_local_files
+# Content-Type: application/json
+#
+# {
+#   "directoryPath": ".",
+#   "recursive": false
+# }
+
+###
+# 4. List Local Files (Recursive)
+# POST {{local_agent_url}}/list_local_files
+# Content-Type: application/json
+#
+# {
+#   "directoryPath": "./apps",
+#   "recursive": true
+# }
