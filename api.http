@@ -102,22 +102,22 @@
 @local_agent_url = http://localhost:52173/mcp
 
 ### Get Local Agent Status
-GET {{local_agent_url}}/status
+# GET {{local_agent_url}}/status
 
 
 ###
 # 1. Get Local File Content
-POST {{local_agent_url}}/get_local_file_content
-Content-Type: application/json
+# POST {{local_agent_url}}/get_local_file_content
+# Content-Type: application/json
 
-{
-  "filePath": "README.md"
-}
+# {
+#   "filePath": "README.md"
+# }
 
 ###
 # POST {{local_agent_url}}/get_local_file_content
 # Content-Type: application/json
-#
+
 # {
 #   "filePath": "packages/local-agent-cli/package.json"
 # }
@@ -126,7 +126,7 @@ Content-Type: application/json
 # 2. Write Local File Content (Not yet implemented in server, placeholder)
 # POST {{local_agent_url}}/write_local_file_content 
 # Content-Type: application/json
-#
+
 # {
 #   "filePath": "test-from-mcp.txt",
 #   "content": "Hello from Local MCP Server!"
