@@ -1,0 +1,99 @@
+@supabase_url = YOUR_SUPABASE_URL_HERE/functions/v1
+@supabase_anon_key = YOUR_SUPABASE_ANON_KEY_HERE
+@user_jwt = YOUR_USER_JWT_HERE # Get this after logging in via GitHub OAuth
+
+### Variables (Set these based on created resources)
+@project_id = 
+@task_id = 
+@scoped_path_name_example = "Frontend Components" # Example, adjust as needed
+
+### Supabase MCP Server - V1 Toolset
+
+# 1. Create Project
+# POST {{supabase_url}}/create-project
+# Authorization: Bearer {{user_jwt}}
+# Content-Type: application/json
+# 
+# {
+#   "projectName": "My New AI Project",
+#   "githubRepoURL": "https://github.com/your-username/my-new-ai-project-repo",
+#   "scopedPaths": [
+#     {
+#       "name": "Frontend Components",
+#       "path": "src/components",
+#       "notes": "All React components for the UI"
+#     },
+#     {
+#       "name": "Backend API",
+#       "path": "src/api",
+#       "notes": "Express routes and controllers"
+#     }
+#   ],
+#   "guidelines": [
+#     "Use TypeScript for all new modules.",
+#     "Follow TDD for critical business logic.",
+#     "Ensure all components are responsive."
+#   ]
+# }
+
+###
+# 2. Get Project Details
+# GET {{supabase_url}}/get-project-details?project_id={{project_id}}
+# Authorization: Bearer {{user_jwt}}
+
+###
+# 3. List Projects
+# GET {{supabase_url}}/list-projects
+# Authorization: Bearer {{user_jwt}}
+
+###
+# 4. Create Task
+# POST {{supabase_url}}/create-task
+# Authorization: Bearer {{user_jwt}}
+# Content-Type: application/json
+# 
+# {
+#   "project_id": "{{project_id}}",
+#   "title": "Implement User Authentication Feature",
+#   "description": "Develop the user login and registration flow using Supabase Auth.",
+#   "associated_scoped_path_name": "{{scoped_path_name_example}}" 
+# }
+
+###
+# 5. Get Task Details
+# GET {{supabase_url}}/get-task-details?task_id={{task_id}}
+# Authorization: Bearer {{user_jwt}}
+
+###
+# 6. List Tasks
+# GET {{supabase_url}}/list-tasks?project_id={{project_id}}
+# Authorization: Bearer {{user_jwt}}
+# 
+# # Optional filters:
+# # GET {{supabase_url}}/list-tasks?project_id={{project_id}}&status_filter=In Progress
+# # GET {{supabase_url}}/list-tasks?project_id={{project_id}}&scoped_path_filter={{scoped_path_name_example}}
+
+###
+# 7. Update Task Status
+# POST {{supabase_url}}/update-task-status
+# Authorization: Bearer {{user_jwt}}
+# Content-Type: application/json
+# 
+# {
+#   "task_id": "{{task_id}}",
+#   "new_status": "In Progress",
+#   "current_branch": "feature/user-auth-123",
+#   "pull_request_url": "https://github.com/your-username/my-new-ai-project-repo/pull/1"
+# }
+
+###
+# 8. Add Comment to Task
+# POST {{supabase_url}}/add-comment-to-task
+# Authorization: Bearer {{user_jwt}}
+# Content-Type: application/json
+# 
+# {
+#   "task_id": "{{task_id}}",
+#   "comment_text": "AI Agent: Starting work on this task. Will create a new branch 'feature/user-auth-ai-dev'.",
+#   "author": "AI-Agent-007" 
+# }
