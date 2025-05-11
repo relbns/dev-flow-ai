@@ -11,9 +11,12 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { project_id } = await req.json();
+    // Read project_id from URL query parameters for a GET request
+    const url = new URL(req.url);
+    const project_id = url.searchParams.get('project_id');
+
     if (!project_id) {
-      return new Response(JSON.stringify({ error: 'project_id is required' }), {
+      return new Response(JSON.stringify({ error: 'project_id query parameter is required' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       });
@@ -90,14 +93,5 @@ serve(async (req: Request) => {
 
 // To deploy: supabase functions deploy get-project-details --project-ref <your-project-ref>
 // To call (example):
-// curl -X POST 'http://localhost:54321/functions/v1/get-project-details' \
-//   -H "Authorization: Bearer <USER_JWT_TOKEN>" \
-//   -H "Content-Type: application/json" \
-//   -d '{"project_id":"your-project-uuid"}'
-//
-// Or if using service_role key (not recommended for direct client/AI agent calls if RLS is desired):
-// curl -X POST 'http://localhost:54321/functions/v1/get-project-details' \
-//   -H "Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>" \
-//   -H "apikey: <SUPABASE_ANON_KEY>" \
-//   -H "Content-Type: application/json" \
-//   -d '{"project_id":"your-project-uuid"}'
+// curl -X GET 'http://localhost:54321/functions/v1/get-project-details?project_id=your-project-uuid' \
+//   -H "Authorization: Bearer <USER_JWT_TOKEN>"

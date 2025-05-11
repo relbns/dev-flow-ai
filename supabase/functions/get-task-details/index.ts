@@ -10,9 +10,12 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { task_id } = await req.json();
+    // Read task_id from URL query parameters for a GET request
+    const url = new URL(req.url);
+    const task_id = url.searchParams.get('task_id');
+
     if (!task_id) {
-      return new Response(JSON.stringify({ error: 'task_id is required' }), {
+      return new Response(JSON.stringify({ error: 'task_id query parameter is required' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       });
@@ -103,7 +106,5 @@ serve(async (req: Request) => {
 
 // To deploy: supabase functions deploy get-task-details --project-ref <your-project-ref>
 // Example curl to test:
-// curl -X POST 'http://localhost:54321/functions/v1/get-task-details' \
-//   -H "Authorization: Bearer <USER_JWT_TOKEN>" \
-//   -H "Content-Type: application/json" \
-//   -d '{"task_id":"your-task-uuid"}'
+// curl -X GET 'http://localhost:54321/functions/v1/get-task-details?task_id=your-task-uuid' \
+//   -H "Authorization: Bearer <USER_JWT_TOKEN>"
