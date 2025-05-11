@@ -1,5 +1,6 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -9,10 +10,37 @@ import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import ThemeToggle from '@/components/ThemeToggle';
-import ApiKeysSection from '@/components/settings/ApiKeysSection'; // Import the new component
-import { Github, User, Bell, Shield, Moon, Sun } from 'lucide-react';
+import ApiKeysSection from '@/components/settings/ApiKeysSection'; 
+import { Github, User, Bell, Shield, Moon, Sun, Edit3 } from 'lucide-react'; // Added Edit3 for an icon
 
 const Settings = () => {
+  const [sessionUser, setSessionUser] = useState(null);
+  const [profileData, setProfileData] = useState({
+    avatarUrl: '',
+    fallbackName: 'N/A',
+    fullName: 'N/A',
+    email: 'N/A',
+    gitHubUsername: 'N/A',
+  });
+
+  useEffect(() => {
+    const fetchSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setSessionUser(session.user);
+        const meta = session.user.user_metadata;
+        setProfileData({
+          avatarUrl: meta.avatar_url || '',
+          fallbackName: (meta.full_name || meta.user_name || 'N A').split(' ').map(n => n[0]).join('').toUpperCase(),
+          fullName: meta.full_name || meta.user_name || 'N/A',
+          email: session.user.email || 'N/A', // Main email from auth.users
+          gitHubUsername: meta.user_name || 'N/A',
+        });
+      }
+    };
+    fetchSession();
+  }, []);
+
   return (
     <div className="flex flex-col h-screen">
       <div className="flex-1 p-6 overflow-auto">
@@ -44,56 +72,41 @@ const Settings = () => {
             <TabsContent value="profile">
               <Card>
                 <CardHeader>
-                  <CardTitle>Profile Settings</CardTitle>
+                  <CardTitle>Profile</CardTitle>
                   <CardDescription>
-                    Manage your profile information
+                    This information is a reflection of your GitHub profile data and is not editable here.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <div className="flex flex-col sm:flex-row gap-6">
-                    <div className="flex flex-col items-center sm:items-start space-y-4">
+                  <div className="flex flex-col sm:flex-row gap-6 items-start">
+                    <div className="flex flex-col items-center sm:items-start space-y-2">
                       <Avatar className="h-24 w-24">
-                        <AvatarImage src="" alt="John Smith" />
-                        <AvatarFallback className="text-2xl">JS</AvatarFallback>
+                        <AvatarImage src={profileData.avatarUrl} alt={profileData.fullName} />
+                        <AvatarFallback className="text-2xl">{profileData.fallbackName}</AvatarFallback>
                       </Avatar>
-                      <Button variant="outline" size="sm">
-                        Change Avatar
+                       <Button variant="outline" size="sm" disabled>
+                        <Edit3 className="mr-2 h-3 w-3" /> Change Avatar (GitHub)
                       </Button>
                     </div>
                     
                     <div className="flex-1 space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label htmlFor="firstName">First Name</Label>
-                          <Input id="firstName" defaultValue="John" />
+                          <Label htmlFor="fullName">Full Name</Label>
+                          <Input id="fullName" value={profileData.fullName} readOnly />
                         </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="lastName">Last Name</Label>
-                          <Input id="lastName" defaultValue="Smith" />
-                        </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="gitHubUsername">GitHub Username</Label>
+                        <Input id="gitHubUsername" value={profileData.gitHubUsername} readOnly />
                       </div>
                       
                       <div className="space-y-2">
                         <Label htmlFor="email">Email</Label>
-                        <Input id="email" type="email" defaultValue="john.smith@example.com" />
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <Label htmlFor="role">Role</Label>
-                        <Input id="role" defaultValue="Developer" />
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <Label htmlFor="bio">Bio</Label>
-                        <Input id="bio" defaultValue="Full-stack developer with 5 years of experience." />
+                        <Input id="email" type="email" value={profileData.email} readOnly />
                       </div>
                     </div>
                   </div>
-                  
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline">Cancel</Button>
-                    <Button>Save Changes</Button>
-                  </div>
+                  {/* "Save Changes" and "Cancel" buttons removed as fields are read-only */}
                 </CardContent>
               </Card>
             </TabsContent>
