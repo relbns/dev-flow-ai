@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react'; // Import useCallback
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,10 +7,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import ProjectCard from '@/components/ProjectCard';
-import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
-import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card"; // Import Card components for skeleton
+import { Skeleton } from "@/components/ui/skeleton"; 
+import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card"; 
 import { Plus, Search, Github, User, Trash2 } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient'; // Using @ alias
 import { useToast } from "@/hooks/use-toast";
 
 const Projects = () => {
@@ -152,7 +152,7 @@ const Projects = () => {
     }
   };
 
-  const fetchProjects = async () => {
+  const fetchProjects = useCallback(async () => { // Wrap with useCallback
     setLoadingProjects(true);
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -175,11 +175,21 @@ const Projects = () => {
     } finally {
       setLoadingProjects(false);
     }
-  };
+  }, [toast]); // Add toast as a dependency for fetchProjects
 
   useEffect(() => {
     fetchProjects();
-  }, []);
+  }, [fetchProjects]); 
+
+  const handleProjectDeleted = (deletedProjectId) => {
+    // Optimistically remove the project from the list
+    setProjects(prevProjects => prevProjects.filter(p => p.id !== deletedProjectId));
+    // Optionally, you can still call fetchProjects() to ensure data consistency
+    // or if other users might be modifying the list. For a single user app,
+    // optimistic update is often enough until next full load/refresh.
+    // For now, let's rely on the optimistic update for perceived speed.
+    // If backend delete failed in ProjectCard, the toast there would inform user.
+  };
 
   if (loadingProjects && projects.length === 0) {
     return (
@@ -391,7 +401,7 @@ const Projects = () => {
             return project.status === filterStatus; 
           })
           .map((project) => (
-          <ProjectCard key={project.id} project={project} />
+          <ProjectCard key={project.id} project={project} onProjectDeleted={handleProjectDeleted} />
         ))}
       </div>
     </div>

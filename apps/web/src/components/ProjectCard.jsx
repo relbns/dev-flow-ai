@@ -1,26 +1,69 @@
 
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom'; // Import useNavigate
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'; // Added DropdownMenuSeparator
 import { Badge } from '@/components/ui/badge';
-import { Clock, MoreVertical, Users, Edit, Trash2, AlertCircle } from 'lucide-react';
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle, 
+  AlertDialogTrigger 
+} from '@/components/ui/alert-dialog'; // Import AlertDialog components
+import { Clock, MoreVertical, Users, Edit, Trash2, AlertCircle, ExternalLink, Eye } from 'lucide-react'; 
 import { formatDistanceToNow, parseISO } from 'date-fns';
-import { useToast } from "@/hooks/use-toast"; // Import useToast
+import { useToast } from "@/hooks/use-toast"; 
+import { supabase } from '@/lib/supabaseClient'; // Using @ alias
 
-const ProjectCard = ({ project }) => {
-  const { toast } = useToast(); // Initialize toast
+const ProjectCard = ({ project, onProjectDeleted }) => { 
+  const { toast } = useToast(); 
+  const navigate = useNavigate(); 
 
-  const handleEdit = () => {
-    toast({ title: "Edit Project", description: "This feature is not yet implemented." });
-    // Later, this would navigate to an edit page or open an edit dialog.
-    // e.g., navigate(`/projects/${project.id}/edit`);
+  const handleOpenProject = () => {
+    navigate(`/projects/${project.id}`);
   };
 
-  const handleDelete = () => {
-    toast({ title: "Delete Project", description: "This feature is not yet implemented.", variant: "destructive" });
-    // Later, this would open a confirmation dialog and then call Supabase to delete.
+  const handleGoToRepository = () => {
+    if (project.github_repo_url) {
+      window.open(project.github_repo_url, '_blank', 'noopener,noreferrer');
+    } else {
+      toast({ title: "No Repository URL", description: "This project does not have a GitHub repository URL set.", variant: "destructive" });
+    }
+  };
+
+  const handleEdit = () => {
+    // You mentioned edit is implemented as a popup on the project page.
+    // So, clicking edit here might also navigate to the project page, perhaps with a query param?
+    // Or, if the project page itself has the edit functionality directly, this button might be redundant
+    // if "Open Project" takes you there. For now, let's keep the toast.
+    // toast({ title: "Edit Project", description: "Edit functionality is available on the project detail page." });
+    navigate(`/projects/${project.id}?action=edit`); 
+  };
+
+  const handleDelete = async () => {
+    // Confirmation is handled by AlertDialog trigger, actual delete logic here
+    try {
+      const { error } = await supabase.functions.invoke('delete-project', {
+        method: 'POST',
+        body: { project_id: project.id },
+      });
+
+      if (error) throw error;
+
+      toast({ title: "Project Deleted", description: `Project "${project.name}" and all its data have been deleted.` });
+      if (onProjectDeleted) {
+        onProjectDeleted(project.id); // Notify parent to refresh list
+      }
+    } catch (err) {
+      console.error("Error deleting project:", err);
+      toast({ title: "Error Deleting Project", description: err.message || "Could not delete the project.", variant: "destructive" });
+    }
   };
 
   const getStatusVariant = (status) => {
@@ -63,14 +106,45 @@ const ProjectCard = ({ project }) => {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem className="cursor-pointer" onClick={handleOpenProject}>
+              <Eye className="mr-2 h-4 w-4" />
+              <span>Open Project</span>
+            </DropdownMenuItem>
+            {project.github_repo_url && (
+              <DropdownMenuItem className="cursor-pointer" onClick={handleGoToRepository}>
+                <ExternalLink className="mr-2 h-4 w-4" />
+                <span>Go to Repository</span>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
             <DropdownMenuItem className="cursor-pointer" onClick={handleEdit}>
               <Edit className="mr-2 h-4 w-4" />
-              <span>Edit Project</span>
+              <span>Edit</span>
             </DropdownMenuItem>
-            <DropdownMenuItem className="cursor-pointer text-destructive" onClick={handleDelete}>
-              <Trash2 className="mr-2 h-4 w-4" />
-              <span>Delete Project</span>
-            </DropdownMenuItem>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <DropdownMenuItem className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10" onSelect={(e) => e.preventDefault()}>
+                  {/* onSelect preventDefault to stop DropdownMenu from closing before AlertDialog opens */}
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  <span>Delete</span>
+                </DropdownMenuItem>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This action cannot be undone. This will permanently delete the project 
+                    <span className="font-semibold"> {project.name}</span> and all its associated data (tasks, guidelines, scoped paths, comments).
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90">
+                    Yes, delete project
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </DropdownMenuContent>
         </DropdownMenu>
       </CardHeader>

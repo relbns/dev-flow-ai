@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'; // Import useSearchParams
 import TaskCard from '@/components/TaskCard';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -172,6 +172,19 @@ const Project = () => {
   useEffect(() => {
     fetchProjectDetails();
   }, [fetchProjectDetails]);
+
+  const [searchParams, setSearchParams] = useSearchParams(); // Initialize useSearchParams
+
+  useEffect(() => {
+    if (searchParams.get('action') === 'edit' && project) { // Ensure project is loaded before trying to open edit
+      setOpenProjectEdit(true);
+      // Optional: Remove the query param to prevent re-triggering if not desired
+      // navigate(`/projects/${projectIdFromParams}`, { replace: true }); 
+      // Or, more simply, clear it:
+      searchParams.delete('action');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, project, projectIdFromParams, navigate]);
   
    useEffect(() => {
     if (openProjectEdit && project) {
@@ -282,7 +295,30 @@ const Project = () => {
   const handleRemoveMember = (id) => { toast({title: "Not Implemented"}); };
   const handleAddMember = (e) => { e.preventDefault(); toast({title: "Not Implemented"}); };
   const handleEditProject = (e) => { e.preventDefault(); toast({title: "Not Implemented"}); };
-  const handleDeleteProject = () => { toast({title: "Not Implemented"}); navigate('/projects'); };
+
+  const handleDeleteProject = async () => {
+    if (!project || !project.id) {
+      toast({ title: "Error", description: "Project context is missing.", variant: "destructive" });
+      return;
+    }
+    try {
+      const { error } = await supabase.functions.invoke('delete-project', {
+        method: 'POST',
+        body: { project_id: project.id },
+      });
+
+      if (error) throw error;
+
+      toast({ title: "Project Deleted", description: `Project "${project.name}" and all its data have been deleted.` });
+      setOpenDeleteProject(false); // Close dialog
+      navigate('/projects'); // Navigate away
+    } catch (err) {
+      console.error("Error deleting project:", err);
+      toast({ title: "Error Deleting Project", description: err.message || "Could not delete the project.", variant: "destructive" });
+      setOpenDeleteProject(false); // Close dialog even on error
+    }
+  };
+
   const getProjectLeader = () => project?.members?.find(m => m.role === 'Project Lead') || project?.members?.[0] || { name: 'N/A', avatar: '' };
   const getOtherMembers = () => project?.members?.filter(m => m.role !== 'Project Lead') || [];
   const getStatusVariant = (status) => 'outline'; 
