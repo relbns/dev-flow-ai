@@ -136,7 +136,7 @@
 # 3. Execute Git Command
 # POST {{local_agent_url}}/execute_git_command
 # Content-Type: application/json
-#
+
 # {
 #   "command_args": ["status"]
 # }
@@ -144,7 +144,7 @@
 ###
 # POST {{local_agent_url}}/execute_git_command
 # Content-Type: application/json
-#
+
 # {
 #   "command_args": ["rev-parse", "--abbrev-ref", "HEAD"]
 # }
@@ -153,13 +153,39 @@
 # (Example of a command that might be disallowed by current patterns if not quoted correctly in JSON)
 # POST {{local_agent_url}}/execute_git_command
 # Content-Type: application/json
-#
+
 # {
 #   "command_args": ["commit", "-m", "Test message with spaces"] 
 # }
 # Note: For commit messages with spaces, ensure the message is a single element in the array if your server logic expects that,
 # or handle joining appropriately. The current CLI pattern expects "commit -m \"Your message\"" as a single string effectively.
 # The MCP server endpoint takes `command_args` as an array, so `["commit", "-m", "My commit message"]` is fine.
+
+### 
+# Execute Git Command via MCP - create branch
+# POST {{local_agent_url}}/execute_git_command
+# Content-Type: application/json
+
+# {
+#   "command_args": ["checkout", "-b", "test-mcp-branch"]
+# }
+
+### Execute Git Command via MCP - switch branch
+# POST {{local_agent_url}}/execute_git_command
+# Content-Type: application/json
+
+# {
+#   "command_args": ["checkout", "master"]
+# }
+
+### Execute Git Command via MCP - disallowed
+# POST {{local_agent_url}}/execute_git_command
+# Content-Type: application/json
+
+# {
+#   "command_args": ["branch", "--all"] 
+# }
+
 
 ###
 # 4. List Local Files (Non-recursive)
