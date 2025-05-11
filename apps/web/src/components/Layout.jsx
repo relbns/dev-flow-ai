@@ -5,33 +5,76 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import CommandPalette from './CommandPalette';
 import { supabase } from '../lib/supabaseClient';
-import { Toaster } from '@/components/ui/toaster'; // Import Toaster
+import { Toaster } from '@/components/ui/toaster';
+import { useToast } from "@/hooks/use-toast"; // Import useToast
 
 const Layout = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [session, setSession] = useState(null);
-  const [contextType, setContextType] = useState('personal');
-  const [organization, setOrganization] = useState(null);
-  const [organizations, setOrganizations] = useState([
-    { id: 'org1', name: 'Frontend Team' },
-    { id: 'org2', name: 'Backend Engineers' },
-    { id: 'org3', name: 'Mobile Dev Group' },
-  ]);
+  const [contextType, setContextType] = useState('personal'); // 'personal' or 'organization'
+  const [organization, setOrganization] = useState(null); // Stores the selected org object
+  const [organizations, setOrganizations] = useState([]); // Fetched from GitHub
+  const [loadingOrgs, setLoadingOrgs] = useState(false);
   const location = useLocation();
+  const { toast } = useToast();
 
+  // Effect for initial session check and auth state changes
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      setSession(currentSession);
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      if (!newSession) { // User logged out
+        setOrganizations([]); // Clear orgs on logout
+        setContextType('personal');
+        setOrganization(null);
+      }
     });
-
     return () => subscription.unsubscribe();
   }, []);
+
+  // Effect to fetch GitHub organizations when session (and provider_token) is available
+  // useEffect(() => {
+  //   const fetchUserOrganizations = async () => {
+  //     console.log("Layout.jsx: Checking session for provider_token. Full session object:", JSON.stringify(session, null, 2)); 
+  //     if (session?.provider_token) {
+  //       console.log("Layout.jsx: Found provider_token:", session.provider_token, "Attempting to fetch orgs.");
+  //       setLoadingOrgs(true);
+  //       try {
+  //         const { data: orgsData, error: orgsError } = await supabase.functions.invoke(
+  //           'get-github-orgs-via-token',
+  //           {
+  //             method: 'POST',
+  //             body: { provider_token: session.provider_token },
+  //           }
+  //         );
+  //         if (orgsError) throw orgsError;
+  //         setOrganizations(orgsData || []);
+  //       } catch (error) {
+  //         console.error("Error fetching GitHub organizations:", error);
+  //         toast({
+  //           title: "Could not fetch GitHub organizations",
+  //           description: error.message,
+  //           variant: "destructive",
+  //         });
+  //         setOrganizations([]); 
+  //       } finally {
+  //         setLoadingOrgs(false);
+  //       }
+  //     } else if (session && !session.provider_token) {
+  //       setOrganizations([]); 
+  //        console.warn("Layout.jsx: Session exists but provider_token is missing. Orgs will not be fetched.");
+  //     } else if (!session) {
+  //       console.log("Layout.jsx: No session available. Orgs will not be fetched.");
+  //       setOrganizations([]);
+  //     }
+  //   };
+
+  //   fetchUserOrganizations();
+  // }, [session?.provider_token, session?.user?.id, toast]); 
+  // Commented out for now: Organization fetching is deferred. `organizations` state will remain [].
 
   const handleContextChange = (type, orgData = null) => {
     setContextType(type);
@@ -63,10 +106,10 @@ const Layout = () => {
             organization={organization}
             organizations={organizations}
             onContextChange={handleContextChange}
-            session={session} // Pass session to Header
+            session={session} 
           />
           <main className="flex-1 overflow-auto">
-            <Outlet />
+            <Outlet context={{ contextType, selectedOrganization: organization, organizations, loadingOrgs }} /> {/* Pass context */}
           </main>
         </div>
       </div>

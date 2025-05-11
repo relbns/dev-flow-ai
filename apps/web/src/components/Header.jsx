@@ -26,7 +26,7 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'github',
         options: {
-          scopes: 'repo user:email',
+          scopes: 'read:org repo user:email',
           redirectTo: window.location.origin, // Redirect back to current page after login
         },
       });
@@ -145,13 +145,7 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
                   <span>{org.name}</span>
                 </DropdownMenuItem>
               ))}
-
-              <DropdownMenuSeparator />
-
-              <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/organizations')}>
-                <Building className="mr-2 h-4 w-4" />
-                <span>Create/Join Organization</span>
-              </DropdownMenuItem>
+              {/* "Create/Join Organization" is removed as orgs are now from GitHub */}
             </DropdownMenuContent>
           </DropdownMenu>
           

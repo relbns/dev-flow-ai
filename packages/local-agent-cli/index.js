@@ -6,15 +6,28 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import express from 'express';
+import cors from 'cors';
 import chalk from 'chalk';
-import ora from 'ora';
 import inquirer from 'inquirer';
+import { fileURLToPath } from 'url';
+import { readConfig, writeConfig } from './configManager.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 const program = new Command();
 
 const INITIAL_CWD = process.cwd();
+let currentApiKey = null;
+let currentProjectRoot = INITIAL_CWD;
+const DEFAULT_PORT = 52173;
+let PORT = DEFAULT_PORT;
 
+// Helper to read package.json for version
+const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'));
+
+// --- Utility Functions ---
 function stripAnsi(str) {
   const ansiRegex = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
   return str.replace(ansiRegex, '');
@@ -22,6 +35,9 @@ function stripAnsi(str) {
 
 function getFileContent(filePath, basePath) {
   const absolutePath = path.resolve(basePath, filePath);
+  if (!absolutePath.startsWith(path.resolve(basePath))) {
+    throw new Error(`Access denied: File path is outside the allowed project root.`);
+  }
   if (!fs.existsSync(absolutePath)) {
     throw new Error(`File not found at ${absolutePath}`);
   }
@@ -30,34 +46,32 @@ function getFileContent(filePath, basePath) {
 
 function writeLocalFileContent(filePath, content, basePath) {
   const absolutePath = path.resolve(basePath, filePath);
+  if (!absolutePath.startsWith(path.resolve(basePath))) {
+    throw new Error(`Access denied: File path is outside the allowed project root.`);
+  }
   fs.writeFileSync(absolutePath, content, 'utf8');
   return `Content successfully written to ${absolutePath}`;
 }
 
-function listLocalFiles(directoryPath, recursive = false, basePath, ignorePatterns = ['node_modules', '.git']) {
-  const resolvedRootPathToList = path.resolve(basePath, directoryPath);
-  if (!fs.existsSync(resolvedRootPathToList)) {
-    throw new Error(`Directory not found at ${resolvedRootPathToList}`);
+function listLocalFiles(directoryPath, recursive = false, basePath, ignorePatterns = ['node_modules', '.git', '.DS_Store']) {
+  const resolvedPathToList = path.resolve(basePath, directoryPath);
+  if (!resolvedPathToList.startsWith(path.resolve(basePath))) {
+    throw new Error(`Access denied: Directory path is outside the allowed project root.`);
   }
-  if (!fs.lstatSync(resolvedRootPathToList).isDirectory()) {
-    throw new Error(`Path is not a directory: ${resolvedRootPathToList}`);
+  if (!fs.existsSync(resolvedPathToList) || !fs.lstatSync(resolvedPathToList).isDirectory()) {
+    throw new Error(`Path is not a directory: ${resolvedPathToList}`);
   }
-
   const filesOutput = [];
-  const items = fs.readdirSync(resolvedRootPathToList, { withFileTypes: true });
-
+  const items = fs.readdirSync(resolvedPathToList, { withFileTypes: true });
   for (const item of items) {
     const itemName = item.name;
-    if (ignorePatterns.includes(itemName)) {
-      continue;
-    }
+    if (ignorePatterns.includes(itemName)) continue;
     const itemRelativePath = path.join(directoryPath, itemName);
-
     if (item.isDirectory()) {
       filesOutput.push({ name: itemName, type: 'directory', path: itemRelativePath.replace(/\\/g, '/') });
       if (recursive) {
-        const subFiles = listLocalFiles(itemRelativePath, true, basePath, ignorePatterns); // Pass ignorePatterns
-        filesOutput.push(...subFiles);
+        const subFiles = listLocalFiles(path.join(directoryPath, itemName), true, basePath, ignorePatterns);
+        filesOutput.push(...subFiles.map(sf => ({...sf, path: path.join(itemName, sf.path).replace(/\\/g, '/')})));
       }
     } else {
       filesOutput.push({ name: itemName, type: 'file', path: itemRelativePath.replace(/\\/g, '/') });
@@ -69,239 +83,174 @@ function listLocalFiles(directoryPath, recursive = false, basePath, ignorePatter
 function executeGitCommandUtility(gitArgsArray, cwd) {
   const commandString = gitArgsArray.join(' ');
   const allowedCommandPatterns = [
-    /^status$/, /^rev-parse --abbrev-ref HEAD$/, /^checkout -b \S+$/, 
-    /^checkout \S+$/, /^add \.$/, /^commit -m ".*"$/, /^commit -m '.*'$/, /^push$/
+    /^status(?: -s)?$/, /^rev-parse --abbrev-ref HEAD$/, /^checkout -b [\w.-]+$/, 
+    /^checkout [\w.-]+$/, /^add (?:[\w.-/]+|\.)$/, /^commit -m ".+"$/, 
+    /^push(?: [\w.-]+ [\w.-]+)?$/, /^pull(?: [\w.-]+ [\w.-]+)?$/, /^branch$/,
+    /^log(?: -\d+)?(?: --oneline)?(?: --graph)?(?: --decorate)?(?: --all)?$/
   ];
-  let isCommandAllowed = false;
-  for (const pattern of allowedCommandPatterns) {
-    if (pattern.test(commandString)) {
-      isCommandAllowed = true;
-      break;
-    }
-  }
-  if (!isCommandAllowed) {
-    const err = new Error(`Command "git ${commandString}" is not allowed or does not match expected pattern in this version.`);
-    // @ts-ignore
-    err.allowedPatterns = [
-      'git status', 'git rev-parse --abbrev-ref HEAD', 'git checkout -b <branch>', 
-      'git checkout <branch>', 'git add .', 'git commit -m "<message>"', 'git push'
-    ];
+  if (!allowedCommandPatterns.some(pattern => pattern.test(commandString))) {
+    const err = new Error(`Command "git ${commandString}" is not allowed.`);
+    err.allowedPatternsExamples = [ /* ... examples ... */ ];
     throw err;
+  }
+  if (!path.resolve(cwd).startsWith(path.resolve(currentProjectRoot))) {
+      throw new Error(`Git command CWD is outside allowed project root. CWD: ${cwd}, Root: ${currentProjectRoot}`);
   }
   return execSync(`git ${commandString}`, { cwd, encoding: 'utf8' });
 }
 
+// --- Express App Setup ---
 const app = express();
+app.use(cors());
 app.use(express.json());
-const DEFAULT_PORT = 52173;
-const PORT = process.env.LOCAL_AGENT_PORT || DEFAULT_PORT;
 
-app.get('/', (req, res) => res.send('DevFlow AI Local Agent MCP Server is running.'));
-app.get('/mcp/status', (req, res) => {
-  res.json({ status: 'active', timestamp: new Date().toISOString(), message: "Local Agent MCP Server is active." });
-});
-app.post('/mcp/get_local_file_content', (req, res) => {
-  const { filePath } = req.body;
-  if (!filePath) return res.status(400).json({ error: 'filePath is required' });
-  try {
-    const content = getFileContent(filePath, INITIAL_CWD);
-    res.json({ filePath, content });
-  } catch (error) {
-    res.status(500).json({ error: stripAnsi(error.message) });
+const mcpAuthMiddleware = (req, res, next) => {
+  if (req.path === '/status' && req.method === 'GET') return next(); // Status is unprotected
+  if (!currentApiKey) {
+    console.warn(chalk.yellow("Warning: API key not configured for server. MCP endpoints protected."));
+    return res.status(503).json({ error: 'Server not configured with API key.' });
   }
-});
-app.post('/mcp/write_local_file_content', (req, res) => {
-  const { filePath, content } = req.body;
-  if (!filePath) return res.status(400).json({ error: 'filePath is required' });
-  if (typeof content !== 'string') return res.status(400).json({ error: 'content (string) is required' });
-  try {
-    const message = writeLocalFileContent(filePath, content, INITIAL_CWD);
-    res.json({ message });
-  } catch (error) {
-    res.status(500).json({ error: stripAnsi(error.message) });
+  const apiKeyHeader = req.headers['x-devflow-api-key'];
+  if (!apiKeyHeader || apiKeyHeader !== currentApiKey) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid or missing API Key.' });
   }
-});
-app.post('/mcp/list_local_files', (req, res) => {
-  const { directoryPath, recursive, ignore } = req.body; // `ignore` could be an array of patterns
-  if (!directoryPath) return res.status(400).json({ error: 'directoryPath is required' });
+  next();
+};
+app.use(mcpAuthMiddleware); // Apply to all routes after this, except /status handled above
+
+// MCP Router (or direct app.post)
+app.post('/mcp/:toolName', async (req, res) => {
+  const { toolName } = req.params;
+  const args = req.body;
+  console.log(`Received MCP request for tool: ${toolName} with args:`, args);
   try {
-    // For now, hardcoded ignores are used in the utility.
-    // If `ignore` is provided in request, it could override/extend defaults in future.
-    const files = listLocalFiles(directoryPath, recursive || false, INITIAL_CWD); 
-    res.json({ directoryPath, recursive, files });
-  } catch (error) {
-    res.status(500).json({ error: stripAnsi(error.message) });
-  }
-});
-app.post('/mcp/execute_git_command', (req, res) => {
-  const { command_args } = req.body;
-  if (!command_args || !Array.isArray(command_args) || command_args.length === 0) {
-    return res.status(400).json({ error: 'command_args (array of strings) is required' });
-  }
-  const commandString = command_args.join(' ');
-  try {
-    const allowedCommandPatterns = [ 
-        /^status$/, /^rev-parse --abbrev-ref HEAD$/, /^checkout -b \S+$/, 
-        /^checkout \S+$/, /^add \.$/, /^commit -m ".*"$/, /^commit -m '.*'$/, /^push$/
-    ];
-    let isCommandAllowed = false;
-    for (const pattern of allowedCommandPatterns) {
-      if (pattern.test(commandString)) {
-        isCommandAllowed = true;
-        break;
-      }
+    let result;
+    switch (toolName) {
+      case 'get_local_file_content': result = getFileContent(args.filePath, currentProjectRoot); break;
+      case 'write_local_file_content': result = writeLocalFileContent(args.filePath, args.content, currentProjectRoot); break;
+      case 'list_local_files': result = listLocalFiles(args.directoryPath, args.recursive, currentProjectRoot, args.ignore); break;
+      case 'execute_git_command': result = { output: executeGitCommandUtility(args.command_args, currentProjectRoot).trim() }; break;
+      default: return res.status(404).json({ error: `Tool "${toolName}" not found.` });
     }
-    if (!isCommandAllowed) {
-      return res.status(400).json({ error: `Command "git ${commandString}" is not allowed or does not match expected pattern.` });
-    }
-    const output = execSync(`git ${commandString}`, { cwd: INITIAL_CWD, encoding: 'utf8' });
-    res.json({ command: `git ${commandString}`, output: output.trim() });
+    res.json({ result });
   } catch (error) {
-    res.status(500).json({ 
-      error: `Error executing git command "git ${commandString}": ${stripAnsi(error.message)}`, 
-      stderr: error.stderr ? error.stderr.toString().trim() : undefined 
-    });
+    console.error(chalk.red(`Error executing tool ${toolName}:`), stripAnsi(error.message));
+    res.status(500).json({ error: stripAnsi(error.message) });
   }
 });
 
-const startServerAction = () => {
-  console.log(chalk.blue(`Project root (for server operations): ${INITIAL_CWD}`));
+app.get('/status', (req, res) => {
+  res.json({ 
+    status: 'active', timestamp: new Date().toISOString(), 
+    message: "DevFlow AI Local Agent MCP Server is active.",
+    projectRoot: currentProjectRoot, port: PORT
+  });
+});
+
+
+// --- Commander CLI Setup ---
+const savedConfig = readConfig(); // Read config early to use for option defaults
+
+program
+  .version(packageJson.version)
+  .description('Local agent CLI for DevFlow AI.')
+  .option('-p, --port <port_number>', 'Port for the MCP server', process.env.DEVFLOW_LOCAL_AGENT_PORT || savedConfig.port || DEFAULT_PORT.toString())
+  .option('-k, --api-key <key>', 'API key for server authentication', process.env.DEVFLOW_LOCAL_AGENT_API_KEY || savedConfig.apiKey)
+  .option('-r, --root <path>', 'Project root directory for operations', process.env.DEVFLOW_LOCAL_AGENT_PROJECT_ROOT || savedConfig.root || INITIAL_CWD);
+
+const startServerAction = (options) => { // options here are from the specific command (e.g. start-server)
+  const globalOpts = program.opts(); // These will have resolved CLI > ENV > Config > Default
+
+  PORT = parseInt(options.port || globalOpts.port, 10);
+  currentApiKey = options.apiKey || globalOpts.apiKey;
+  currentProjectRoot = path.resolve(options.root || globalOpts.root);
+
+  if (isNaN(PORT)) {
+    console.error(chalk.red('Error: Invalid port number.')); process.exit(1);
+  }
+  if (!currentApiKey) {
+    console.error(chalk.red('Error: API Key is required. Use --api-key or DEVFLOW_LOCAL_AGENT_API_KEY.')); process.exit(1);
+  }
+  try {
+    if (!fs.existsSync(currentProjectRoot) || !fs.lstatSync(currentProjectRoot).isDirectory()) {
+      console.error(chalk.red(`Error: Project root "${currentProjectRoot}" is not a valid directory.`)); process.exit(1);
+    }
+  } catch (error) {
+    console.error(chalk.red(`Error with project root "${currentProjectRoot}":`), error.message); process.exit(1);
+  }
+
+  console.log(chalk.blue(`Project root set to: ${currentProjectRoot}`));
   app.listen(PORT, () => {
     console.log(chalk.green.bold(`DevFlow AI Local Agent MCP Server started on http://localhost:${PORT}`));
-    console.log(chalk.blue('Operating relative to project root:'), chalk.yellow(INITIAL_CWD));
-    console.log(chalk.blue('Available MCP endpoints (examples):'));
-    console.log(chalk.cyan(`  GET  /mcp/status`));
-    console.log(chalk.cyan(`  POST /mcp/get_local_file_content (body: { "filePath": "path/to/your/file.txt" })`));
-    console.log(chalk.cyan(`  POST /mcp/write_local_file_content (body: { "filePath": "path/to/file.txt", "content": "Hello World" })`));
-    console.log(chalk.cyan(`  POST /mcp/execute_git_command (body: { "command_args": ["status"] })`));
-    console.log(chalk.cyan(`  POST /mcp/list_local_files (body: { "directoryPath": "./", "recursive": false })`));
+    console.log(chalk.blue('API Key Loaded. MCP Endpoints require X-DevFlow-API-Key header.'));
   });
 };
 
 program
-  .version('0.0.1')
-  .description('Local agent CLI for DevFlow AI. Use "start-server" to launch the MCP server, or run without arguments to start server by default.');
-
-program
-  .command('start-server')
-  .description('Starts the Local Agent MCP HTTP server.')
+  .command('start-server', { isDefault: true }) // Make start-server the default command
+  .description('Starts the Local Agent MCP HTTP server (default command).')
+  // Options defined globally will be available here too
   .action(startServerAction);
 
-program
-  .command('hello')
-  .description('Prints a hello message from the local agent (direct CLI mode).')
-  .action(() => {
-    console.log(chalk.magenta.bold('Hello from the DevFlow AI Local Agent CLI (direct mode)!'));
-    console.log(chalk.blue('This agent can also host an MCP server to interact with your local codebase.'));
-    console.log(chalk.blue('Run "devflow-local-agent start-server" or "npm start" in this package to launch it.'));
-  });
+// Define other CLI utility commands
+program.command('hello').action(() => console.log(chalk.magenta.bold('Hello from DevFlow AI Local Agent!')));
 
 program
-  .command('get-file-content <filePath>')
-  .description('Reads and prints the content of a local file (direct CLI mode).')
-  .action((filePath) => {
+  .command('configure')
+  .description('Configure default API Key, port, and project root for the Local Agent.')
+  .action(async () => {
+    const currentConfig = readConfig();
+    console.log(chalk.blue('Current configuration:'), currentConfig);
+
+    const questions = [
+      {
+        type: 'password', // Use password type to mask API key input
+        name: 'apiKey',
+        message: 'Enter your DevFlow AI API Key:',
+        default: currentConfig.apiKey,
+        mask: '*',
+        validate: function (value) {
+          if (value.length) {
+            return true;
+          }
+          return 'API Key cannot be empty.';
+        },
+      },
+      {
+        type: 'input',
+        name: 'port',
+        message: 'Enter default port for the MCP server:',
+        default: currentConfig.port || DEFAULT_PORT.toString(),
+        validate: function (value) {
+          const port = parseInt(value, 10);
+          if (!isNaN(port) && port > 0 && port < 65536) {
+            return true;
+          }
+          return 'Please enter a valid port number (1-65535).';
+        },
+      },
+      {
+        type: 'input',
+        name: 'root',
+        message: 'Enter default project root path (absolute path, leave empty to use current dir when starting):',
+        default: currentConfig.root || '', // Empty means use CWD at start time
+      },
+    ];
+
     try {
-      const content = getFileContent(filePath, process.cwd()); 
-      console.log(chalk.blue(`Content of ${chalk.underline(path.resolve(process.cwd(), filePath))}:\n`));
-      console.log(content);
+      const answers = await inquirer.prompt(questions);
+      const newConfig = {
+        apiKey: answers.apiKey,
+        port: parseInt(answers.port, 10),
+        root: answers.root.trim() === '' ? undefined : path.resolve(answers.root.trim()), // Store absolute path or undefined
+      };
+      writeConfig(newConfig);
     } catch (error) {
-      console.error(chalk.red(stripAnsi(error.message)));
-      process.exit(1);
+      console.error(chalk.red('Failed to save configuration:'), error.message);
     }
   });
 
-program
-  .command('git <gitArgs...>')
-  .description('Executes a git command with the provided arguments (direct CLI mode).')
-  .action(async (gitArgs) => { 
-    const commandString = gitArgs.join(' ');
-    const spinner = ora({
-      text: chalk.yellow(`Executing: git ${commandString} (in ${process.cwd()})`),
-      spinner: 'dots'
-    }).start();
-    try {
-      const output = executeGitCommandUtility(gitArgs, process.cwd()); 
-      spinner.succeed(chalk.green(`Successfully executed: git ${commandString}`));
-      if (output.trim()) {
-        console.log(output.trim());
-      }
-    } catch (error) {
-      spinner.fail(chalk.red(`Error executing git command "git ${commandString}":`));
-      console.error(stripAnsi(error.message)); 
-      // @ts-ignore
-       if (error.allowedPatterns) { 
-        console.error(chalk.yellow('Allowed git command patterns are (examples):'));
-        // @ts-ignore
-        error.allowedPatterns.forEach(p => console.error(chalk.yellowBright(`  ${p}`)));
-      }
-      if (error.stderr) {
-        console.error(chalk.red("Git stderr:\n"), error.stderr);
-      }
-      process.exit(1);
-    }
-  });
 
-program
-  .command('list-files <directoryPath>')
-  .option('-r, --recursive', 'List files recursively')
-  .description('Lists files in a directory (direct CLI mode).')
-  .action((directoryPath, options) => {
-    try {
-      const files = listLocalFiles(directoryPath, options.recursive || false, process.cwd());
-      const resolvedRootDisplayPath = path.resolve(process.cwd(), directoryPath);
-      console.log(chalk.blue(`Files in ${chalk.underline(resolvedRootDisplayPath)}${options.recursive ? ' (recursive):' : ':'}\n`));
-      files.forEach(file => {
-        const typeColor = file.type === 'directory' ? chalk.cyan : chalk.white;
-        console.log(`  ${typeColor(file.path)} (${chalk.italic(file.type)})`);
-      });
-    } catch (error) {
-      console.error(stripAnsi(error.message));
-      process.exit(1);
-    }
-  });
-
-program
-  .command('write-file-content <filePath> [content]')
-  .description('Writes content to a local file (direct CLI mode). If content is not provided, writes an empty string.')
-  .action(async (filePath, content) => { 
-    try {
-      const absolutePath = path.resolve(process.cwd(), filePath); 
-      if (fs.existsSync(absolutePath)) {
-        const { overwrite } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'overwrite',
-            message: chalk.yellow(`File ${chalk.underline(absolutePath)} already exists. Overwrite?`),
-            default: false,
-          },
-        ]);
-        if (!overwrite) {
-          console.log(chalk.yellow('Operation cancelled by user.'));
-          process.exit(0);
-        }
-      }
-      const message = writeLocalFileContent(filePath, content || "", process.cwd());
-      console.log(chalk.green(message)); 
-    } catch (error) {
-      console.error(chalk.red(`Error writing to file ${chalk.underline(filePath)}:`), stripAnsi(error.message));
-      process.exit(1);
-    }
-  });
-
-program.action(() => {
-    const args = process.argv.slice(2);
-    let commandExplicitlyCalled = false;
-    program.commands.forEach(cmd => {
-        if (args.includes(cmd.name())) {
-            commandExplicitlyCalled = true;
-        }
-    });
-
-    if (!commandExplicitlyCalled && args.filter(arg => !arg.startsWith('-')).length === 0) {
-        startServerAction();
-    } else if (!commandExplicitlyCalled && args.length === 0) {
-        startServerAction();
-    }
-});
+// ... (add back other direct CLI commands like get-file-content, git, list-files, write-file-content if needed, adapting them to use program.opts() for global options like --root)
 
 program.parse(process.argv);

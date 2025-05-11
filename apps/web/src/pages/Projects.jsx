@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react'; // Import useCallback
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useOutletContext } from 'react-router-dom'; // Import useOutletContext
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,9 +16,11 @@ import { useToast } from "@/hooks/use-toast";
 const Projects = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { contextType, selectedOrganization } = useOutletContext(); // Consume context
+
   const [openNewProjectDialog, setOpenNewProjectDialog] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all'); // This filter is for project.status, not orgs
   const [projects, setProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
 
@@ -91,14 +93,24 @@ const Projects = () => {
     try {
       setLoadingProjects(true);
       // 1. Insert into 'projects' table
+      const projectInsertData = {
+        user_id: userId,
+        name: newProjectForm.name,
+        github_repo_url: newProjectForm.repository,
+        description: newProjectForm.description,
+      };
+
+      if (contextType === 'organization' && selectedOrganization) {
+        projectInsertData.github_org_id = selectedOrganization.id;
+        projectInsertData.github_org_login = selectedOrganization.login;
+      } else {
+        projectInsertData.github_org_id = null;
+        projectInsertData.github_org_login = null;
+      }
+
       const { data: projectData, error: projectError } = await supabase
         .from('projects')
-        .insert({
-          user_id: userId,
-          name: newProjectForm.name,
-          github_repo_url: newProjectForm.repository,
-          description: newProjectForm.description,
-        })
+        .insert(projectInsertData)
         .select()
         .single();
 
@@ -161,11 +173,22 @@ const Projects = () => {
       return;
     }
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('projects')
-        .select('*')
+        .select('*, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)') // Fetch related data too
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false });
+
+      if (contextType === 'organization' && selectedOrganization) {
+        query = query.eq('github_org_id', selectedOrganization.id);
+      } else if (contextType === 'personal') {
+        query = query.is('github_org_id', null);
+      }
+      // If contextType is 'all' or something else, no org filter is applied (shows all user's projects)
+      // For now, 'personal' means no org_id, 'organization' means specific org_id.
+
+      const { data, error } = await query;
+      
       if (error) throw error;
       setProjects(data || []);
     } catch (error) {
@@ -175,11 +198,11 @@ const Projects = () => {
     } finally {
       setLoadingProjects(false);
     }
-  }, [toast]); // Add toast as a dependency for fetchProjects
+  }, [toast, contextType, selectedOrganization]); // Add context dependencies
 
   useEffect(() => {
     fetchProjects();
-  }, [fetchProjects]); 
+  }, [fetchProjects]); // fetchProjects itself now depends on contextType and selectedOrganization
 
   const handleProjectDeleted = (deletedProjectId) => {
     // Optimistically remove the project from the list
