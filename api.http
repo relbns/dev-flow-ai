@@ -17,7 +17,7 @@
 
 ###
 # MCP Gateway Test - Get Task Details
-@devflow_api_key = dfai_sk_94aac2cbc783cc59967b97d6242e38625d77f25512c296a98778c4e3748384db
+@devflow_api_key = dfai_sk_a9dd106f702b6cbd06193706ec882ecce75c6e2863659f9bc4ea20ac07766db6
 
 POST {{supabase_url}}/mcp-gateway
 Content-Type: application/json

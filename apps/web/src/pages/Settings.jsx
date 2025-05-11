@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import ThemeToggle from '@/components/ThemeToggle';
+import ApiKeysSection from '@/components/settings/ApiKeysSection'; // Import the new component
 import { Github, User, Bell, Shield, Moon, Sun } from 'lucide-react';
 
 const Settings = () => {
@@ -284,18 +285,8 @@ const Settings = () => {
                   </div>
                   
                   <div className="pb-2 pt-4 border-t">
-                    <h3 className="font-medium mb-4">API Access</h3>
-                    <div className="space-y-2">
-                      <Label htmlFor="apiKey">API Key</Label>
-                      <div className="flex gap-2">
-                        <Input id="apiKey" value="••••••••••••••••••••••" readOnly className="flex-1 font-mono" />
-                        <Button variant="outline">Regenerate</Button>
-                        <Button variant="outline">Copy</Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Use this API key to access the CodeTaskHub API.
-                      </p>
-                    </div>
+                    {/* Replace placeholder with the actual ApiKeysSection component */}
+                    <ApiKeysSection />
                   </div>
                 </CardContent>
               </Card>
