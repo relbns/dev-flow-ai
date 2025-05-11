@@ -1,15 +1,170 @@
-@supabase_url = YOUR_SUPABASE_URL_HERE/functions/v1
-@supabase_anon_key = YOUR_SUPABASE_ANON_KEY_HERE
-@user_jwt = YOUR_USER_JWT_HERE # Get this after logging in via GitHub OAuth
+@supabase_url = https://xfoxoiurhhqjjhqhoaaf.supabase.co/functions/v1
+@supabase_anon_key = SUPABASE_ANON_KEY
+
+#YOUR_USER_JWT_HERE # Get this after logging in via GitHub OAuth
+@user_jwt = eyJhbGciOiJIUzI1NiIsImtpZCI6IlBYOVkwUFlyeWxsVmxyVloiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3hmb3hvaXVyaGhxampocWhvYWFmLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI1ZmMyMDkxYS1jODZmLTQ2NjQtODBhYy0zZjliYjljZTU0YTciLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzQ2OTMyMDY4LCJpYXQiOjE3NDY5Mjg0NjgsImVtYWlsIjoiYXJpZWxiZW5lc2hAZ21haWwuY29tIiwicGhvbmUiOiIiLCJhcHBfbWV0YWRhdGEiOnsicHJvdmlkZXIiOiJnaXRodWIiLCJwcm92aWRlcnMiOlsiZ2l0aHViIl19LCJ1c2VyX21ldGFkYXRhIjp7ImF2YXRhcl91cmwiOiJodHRwczovL2F2YXRhcnMuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3UvODUxNjEyNzk_dj00IiwiZW1haWwiOiJhcmllbGJlbmVzaEBnbWFpbC5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwiZnVsbF9uYW1lIjoiQXJpZWwgQmVuZXNoIiwiaXNzIjoiaHR0cHM6Ly9hcGkuZ2l0aHViLmNvbSIsIm5hbWUiOiJBcmllbCBCZW5lc2giLCJwaG9uZV92ZXJpZmllZCI6ZmFsc2UsInByZWZlcnJlZF91c2VybmFtZSI6InJlbGJucyIsInByb3ZpZGVyX2lkIjoiODUxNjEyNzkiLCJzdWIiOiI4NTE2MTI3OSIsInVzZXJfbmFtZSI6InJlbGJucyJ9LCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImFhbCI6ImFhbDEiLCJhbXIiOlt7Im1ldGhvZCI6Im9hdXRoIiwidGltZXN0YW1wIjoxNzQ2ODE5NDE1fV0sInNlc3Npb25faWQiOiJjYWE3YjcyOS1kYTdlLTQxNWEtOTA3ZC04ZGJjNjA2ZTExZmIiLCJpc19hbm9ueW1vdXMiOmZhbHNlfQ.bo9Ii6RX-uLAwu92boSGuVdenjO25VwJ5J7JQ3tnEKM
 
 ### Variables (Set these based on created resources)
-@project_id = 
-@task_id = 
-@scoped_path_name_example = "Frontend Components" # Example, adjust as needed
+@project_id = 6de69e1c-7151-4743-b83b-cf2adbd1c931
+@gateway_project_id = c5345bd3-b24f-4084-8154-16e52778068d 
+@task_id = 369c408b-87ad-4a3c-96cd-b49d621a78e6
+@gateway_task_id = a80e5758-f790-4111-8cb5-cac476e80bb5
+
+# Example, adjust as needed
+@scoped_path_name_example = "Frontend Components"
 
 ### Supabase MCP Server - V1 Toolset
 
-# 1. Create Project
+###
+# MCP Gateway Test - Get Task Details
+@devflow_api_key = dfai_sk_94aac2cbc783cc59967b97d6242e38625d77f25512c296a98778c4e3748384db
+
+POST {{supabase_url}}/mcp-gateway
+Content-Type: application/json
+X-DevFlow-API-Key: {{devflow_api_key}}
+
+{
+  "tool_name": "get-task-details", 
+  "arguments": {
+    "task_id": "{{task_id}}" 
+  }
+}
+
+###
+# Delete API Key (Direct User Call)
+@api_key_to_delete = ab79dd62-a069-4fe3-8a79-94844091aba7
+#
+POST {{supabase_url}}/delete-api-key
+Authorization: Bearer {{user_jwt}}
+Content-Type: application/json
+apikey: {{supabase_anon_key}}
+
+{
+  "api_key_id": "{{api_key_to_delete}}"
+}
+
+###
+# List API Keys (Direct User Call)
+GET {{supabase_url}}/list-api-keys
+Authorization: Bearer {{user_jwt}}
+apikey: {{supabase_anon_key}} 
+
+###
+# MCP Gateway Test - List Tasks
+# POST {{supabase_url}}/mcp-gateway
+# Content-Type: application/json
+# X-DevFlow-API-Key: {{devflow_api_key}}
+#
+# {
+#   "tool_name": "list-tasks",
+#   "arguments": {
+#     "project_id": "{{project_id}}"
+#   }
+# }
+
+###
+# MCP Gateway Test - List Projects
+# POST {{supabase_url}}/mcp-gateway
+# Content-Type: application/json
+# X-DevFlow-API-Key: {{devflow_api_key}}
+#
+# {
+#   "tool_name": "list-projects",
+#   "arguments": {}
+# }
+
+###
+# MCP Gateway Test - Get Project Details
+# POST {{supabase_url}}/mcp-gateway
+# Content-Type: application/json
+# X-DevFlow-API-Key: {{devflow_api_key}}
+#
+# {
+#   "tool_name": "get-project-details",
+#   "arguments": {
+#     "project_id": "{{project_id}}"
+#   }
+# }
+
+###
+# MCP Gateway Test - Create Project
+# POST {{supabase_url}}/mcp-gateway
+# Content-Type: application/json
+# X-DevFlow-API-Key: {{devflow_api_key}}
+#
+# {
+#   "tool_name": "create-project",
+#   "arguments": {
+#     "projectName": "Gateway Project Delta", 
+#     "description": "Created via the MCP Gateway!",
+#     "githubRepoURL": "https://github.com/test/gateway-delta",
+#     "guidelines": ["Guideline Delta 1"],
+#     "scopedPaths": [
+#       {"name": "Delta Frontend", "path_in_repo": "src/delta-fe", "notes": "FE for Delta"}
+#     ]
+#   }
+# }
+
+###
+# MCP Gateway Test - Create Task
+# POST {{supabase_url}}/mcp-gateway
+# Content-Type: application/json
+# X-DevFlow-API-Key: {{devflow_api_key}}
+#
+# {
+#   "tool_name": "create-task",
+#   "arguments": {
+#     "project_id": "{{gateway_project_id}}", 
+#     "title": "Gateway Task Epsilon",
+#     "description": "Task created via MCP Gateway for project.",
+#     "status": "Backlog"
+#   }
+# }
+
+###
+# MCP Gateway Test - Update Task Status
+# POST {{supabase_url}}/mcp-gateway
+# Content-Type: application/json
+# X-DevFlow-API-Key: {{devflow_api_key}}
+#
+# {
+#   "tool_name": "update-task-status",
+#   "arguments": {
+#     "task_id": "{{gateway_task_id}}", 
+#     "new_status": "In Progress",
+#     "current_branch": "feature/gateway-epsilon-progress"
+#   }
+# }
+
+###
+# MCP Gateway Test - Add Comment to Task (NEW)
+POST {{supabase_url}}/mcp-gateway
+Content-Type: application/json
+X-DevFlow-API-Key: {{devflow_api_key}}
+
+{
+  "tool_name": "add-comment-to-task",
+  "arguments": {
+    "task_id": "{{gateway_task_id}}", 
+    "comment_text": "This is a comment from the AI via Gateway!",
+    "author_display_name": "Gateway AI Helper" 
+  }
+}
+
+
+###
+# 0. Generate API Key (Legacy - for direct user testing if needed)
+# POST {{supabase_url}}/generate-api-key
+# Authorization: Bearer {{user_jwt}}
+# Content-Type: application/json
+#
+# {
+#   "name": "My Legacy Test Key" 
+# }
+
+###
+# 1. Create Project (Legacy - for direct user testing if needed)
+# ... (rest of the legacy direct test blocks remain unchanged) ...
 # POST {{supabase_url}}/create-project
 # Authorization: Bearer {{user_jwt}}
 # Content-Type: application/json
@@ -37,35 +192,35 @@
 # }
 
 ###
-# 2. Get Project Details
+# 2. Get Project Details (Legacy - for direct user testing if needed)
 # GET {{supabase_url}}/get-project-details?project_id={{project_id}}
 # Authorization: Bearer {{user_jwt}}
 
 ###
-# 3. List Projects
+# 3. List Projects (Legacy - for direct user testing if needed)
 # GET {{supabase_url}}/list-projects
 # Authorization: Bearer {{user_jwt}}
 
 ###
-# 4. Create Task
+# 4. Create Task (Legacy - for direct user testing if needed)
 # POST {{supabase_url}}/create-task
 # Authorization: Bearer {{user_jwt}}
 # Content-Type: application/json
 # 
 # {
-#   "project_id": "{{project_id}}",
+#   "project_id": "{{project_id}}", 
 #   "title": "Implement User Authentication Feature",
 #   "description": "Develop the user login and registration flow using Supabase Auth.",
 #   "associated_scoped_path_name": "{{scoped_path_name_example}}" 
 # }
 
 ###
-# 5. Get Task Details
+# 5. Get Task Details (Legacy - for direct user testing if needed)
 # GET {{supabase_url}}/get-task-details?task_id={{task_id}}
 # Authorization: Bearer {{user_jwt}}
 
 ###
-# 6. List Tasks
+# 6. List Tasks (Legacy - for direct user testing if needed)
 # GET {{supabase_url}}/list-tasks?project_id={{project_id}}
 # Authorization: Bearer {{user_jwt}}
 # 
@@ -74,7 +229,7 @@
 # # GET {{supabase_url}}/list-tasks?project_id={{project_id}}&scoped_path_filter={{scoped_path_name_example}}
 
 ###
-# 7. Update Task Status
+# 7. Update Task Status (Legacy - for direct user testing if needed)
 # POST {{supabase_url}}/update-task-status
 # Authorization: Bearer {{user_jwt}}
 # Content-Type: application/json
@@ -87,7 +242,7 @@
 # }
 
 ###
-# 8. Add Comment to Task
+# 8. Add Comment to Task (Legacy - for direct user testing if needed)
 # POST {{supabase_url}}/add-comment-to-task
 # Authorization: Bearer {{user_jwt}}
 # Content-Type: application/json
@@ -123,7 +278,7 @@
 # }
 
 ###
-# 2. Write Local File Content (Not yet implemented in server, placeholder)
+# 2. Write Local File Content 
 # POST {{local_agent_url}}/write_local_file_content 
 # Content-Type: application/json
 
@@ -131,6 +286,7 @@
 #   "filePath": "test-from-mcp.txt",
 #   "content": "Hello from Local MCP Server!"
 # }
+
 
 ###
 # 3. Execute Git Command
@@ -157,9 +313,6 @@
 # {
 #   "command_args": ["commit", "-m", "Test message with spaces"] 
 # }
-# Note: For commit messages with spaces, ensure the message is a single element in the array if your server logic expects that,
-# or handle joining appropriately. The current CLI pattern expects "commit -m \"Your message\"" as a single string effectively.
-# The MCP server endpoint takes `command_args` as an array, so `["commit", "-m", "My commit message"]` is fine.
 
 ### 
 # Execute Git Command via MCP - create branch

@@ -8,87 +8,106 @@ interface TaskPayload {
   project_id: string;
   title: string;
   description?: string | null;
-  status?: string | null; // Default to 'Backlog' if not provided
+  status?: string | null;
   scoped_path_id?: string | null;
+  user_id_from_gateway?: string; // Added for gateway calls
 }
 
-// Helper function to verify project ownership
-async function verifyProjectOwnership(supabaseClient: SupabaseClient, userId: string, projectId: string): Promise<boolean> {
+// Helper to create a Supabase client with service_role_key for admin operations
+function createAdminClient(): SupabaseClient {
+  return createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    { auth: { persistSession: false } }
+  );
+}
+
+// Updated helper function to verify project ownership using the determined userIdForQuery
+async function verifyProjectOwnership(supabaseClient: SupabaseClient, userIdForQuery: string, projectId: string): Promise<boolean> {
   const { data, error } = await supabaseClient
     .from('projects')
     .select('id')
     .eq('id', projectId)
-    .eq('user_id', userId)
+    .eq('user_id', userIdForQuery)
     .single();
   
-  if (error && error.code !== 'PGRST116') { // PGRST116: "Searched item was not found"
+  if (error && error.code !== 'PGRST116') { 
     console.error("Error verifying project ownership:", error);
   }
   return !!data;
 }
 
-
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
+  }
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed. Only POST is accepted.' }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 405,
+    });
   }
 
   try {
     const payload: TaskPayload = await req.json();
     if (!payload.project_id || !payload.title) {
       return new Response(JSON.stringify({ error: 'project_id and title are required' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
       });
     }
 
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 401,
-      });
+    let userIdForQuery: string;
+    let supabaseClientForQuery: SupabaseClient;
+    const userIdFromGateway = payload.user_id_from_gateway;
+
+    if (userIdFromGateway) {
+      // Called by gateway
+      console.log(`create-task called by gateway for user_id: ${userIdFromGateway}, project_id: ${payload.project_id}`);
+      userIdForQuery = userIdFromGateway;
+      supabaseClientForQuery = createAdminClient();
+    } else {
+      // Direct call, expect User JWT
+      const authHeader = req.headers.get('Authorization');
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
+        });
+      }
+      supabaseClientForQuery = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      const { data: { user }, error: userError } = await supabaseClientForQuery.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: 'User not authenticated or token invalid' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
+        });
+      }
+      userIdForQuery = user.id;
     }
 
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'User not authenticated or token invalid' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 401,
-      });
-    }
-
-    // Verify project ownership
-    const isOwner = await verifyProjectOwnership(supabaseClient, user.id, payload.project_id);
+    // Verify project ownership using the determined userIdForQuery
+    const isOwner = await verifyProjectOwnership(supabaseClientForQuery, userIdForQuery, payload.project_id);
     if (!isOwner) {
-      return new Response(JSON.stringify({ error: 'User does not own this project or project not found.' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 403, // Forbidden
+      return new Response(JSON.stringify({ error: 'Access denied: User does not own this project or project not found.' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
       });
     }
     
-    console.log(`Creating task "${payload.title}" for project ${payload.project_id} by user ${user.id}`);
+    console.log(`Creating task "${payload.title}" for project ${payload.project_id} by effective user_id ${userIdForQuery}`);
 
     const taskToInsert = {
       project_id: payload.project_id,
       title: payload.title,
       description: payload.description || null,
-      status: payload.status || 'Backlog', // Default to 'Backlog'
+      status: payload.status || 'Backlog',
       scoped_path_id: payload.scoped_path_id || null,
-      // user_id could be added here if tasks are directly associated with a creator user
-      // but current schema links tasks to projects, and projects to users.
     };
 
-    const { data: newTask, error: insertError } = await supabaseClient
+    const { data: newTask, error: insertError } = await supabaseClientForQuery
       .from('tasks')
       .insert(taskToInsert)
-      .select()
+      .select() // Select all columns of the newly inserted task
       .single();
 
     if (insertError) {
@@ -99,35 +118,16 @@ serve(async (req: Request) => {
     console.log("Task created successfully:", newTask);
 
     return new Response(JSON.stringify(newTask), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 201, // Created
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 201,
     });
 
   } catch (err) {
     console.error("Overall error in create-task function:", err);
-    // Check for specific PostgreSQL error codes if needed, e.g., foreign key violation
-    if (err.code === '23503') { // foreign_key_violation
-        return new Response(JSON.stringify({ error: 'Invalid project_id or scoped_path_id.' }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 400, 
-        });
-    }
+    const statusCode = err.code === '23503' ? 400 : 500; // foreign_key_violation (e.g. bad project_id)
     return new Response(JSON.stringify({ error: err.message || 'Failed to create task' }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: statusCode,
     });
   }
 });
 
-// To deploy: supabase functions deploy create-task --project-ref <your-project-ref>
-// Example curl to test:
-// curl -X POST 'http://localhost:54321/functions/v1/create-task' \
-//   -H "Authorization: Bearer <USER_JWT_TOKEN>" \
-//   -H "Content-Type: application/json" \
-//   -d '{
-//         "project_id": "your-project-uuid",
-//         "title": "New MCP Task Title",
-//         "description": "Description for the new MCP task.",
-//         "status": "To Do",
-//         "scoped_path_id": "optional-scoped-path-uuid" 
-//       }'
+// To deploy: supabase functions deploy create-task --project-ref <your-project-ref> --no-verify-jwt

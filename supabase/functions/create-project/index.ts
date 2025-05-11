@@ -14,20 +14,29 @@ interface ProjectPayload {
   projectName: string;
   githubRepoURL?: string | null;
   description?: string | null;
-  guidelines?: string[]; // Array of guideline strings
+  guidelines?: string[];
   scopedPaths?: ScopedPath[];
+  user_id_from_gateway?: string; // Added for gateway calls
+}
+
+// Helper to create a Supabase client with service_role_key for admin operations
+function createAdminClient(): SupabaseClient {
+  return createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    { auth: { persistSession: false } }
+  );
 }
 
 async function insertProjectData(
-  supabaseClient: SupabaseClient,
-  userId: string,
+  supabaseClient: SupabaseClient, // This will be either user-specific or admin client
+  userIdForQuery: string, // The effective user ID for the operation
   payload: ProjectPayload
 ) {
-  // 1. Insert into 'projects' table
   const { data: projectData, error: projectError } = await supabaseClient
     .from('projects')
     .insert({
-      user_id: userId,
+      user_id: userIdForQuery, // Use the determined user ID
       name: payload.projectName,
       github_repo_url: payload.githubRepoURL || null,
       description: payload.description || null,
@@ -41,7 +50,6 @@ async function insertProjectData(
   }
   const newProjectId = projectData.id;
 
-  // 2. Insert into 'project_guidelines' table
   if (payload.guidelines && payload.guidelines.length > 0) {
     const guidelinesToInsert = payload.guidelines.map((text, index) => ({
       project_id: newProjectId,
@@ -51,18 +59,12 @@ async function insertProjectData(
     const { error: guidelineError } = await supabaseClient
       .from('project_guidelines')
       .insert(guidelinesToInsert);
-    if (guidelineError) {
-      console.error("Error inserting project guidelines:", guidelineError);
-      // Decide if this should be a fatal error or just a warning
-      // For now, log and continue
-    }
+    if (guidelineError) console.error("Error inserting project guidelines:", guidelineError);
   }
 
-  // 3. Insert into 'scoped_paths' table
   const validScopedPaths = (payload.scopedPaths || []).filter(
     sp => (sp.name && sp.name.trim() !== '') || (sp.path_in_repo && sp.path_in_repo.trim() !== '') || (sp.notes && sp.notes.trim() !== '')
   );
-
   if (validScopedPaths.length > 0) {
     const scopedPathsToInsert = validScopedPaths.map(sp => ({
       project_id: newProjectId,
@@ -73,10 +75,7 @@ async function insertProjectData(
     const { error: scopedPathsError } = await supabaseClient
       .from('scoped_paths')
       .insert(scopedPathsToInsert);
-    if (scopedPathsError) {
-      console.error("Error inserting scoped paths:", scopedPathsError);
-      // Log and continue
-    }
+    if (scopedPathsError) console.error("Error inserting scoped paths:", scopedPathsError);
   }
   return newProjectId;
 }
@@ -85,87 +84,83 @@ serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed. Only POST is accepted.' }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 405,
+    });
+  }
 
   try {
     const payload: ProjectPayload = await req.json();
     if (!payload.projectName) {
       return new Response(JSON.stringify({ error: 'projectName is required' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
       });
     }
 
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 401,
-      });
-    }
+    let userIdForQuery: string;
+    let supabaseClientForQuery: SupabaseClient;
+    const userIdFromGateway = payload.user_id_from_gateway; // Gateway adds this to the body
 
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) {
-        return new Response(JSON.stringify({ error: 'User not authenticated or token invalid' }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 401,
+    if (userIdFromGateway) {
+      // Called by gateway
+      console.log(`create-project called by gateway for user_id: ${userIdFromGateway}`);
+      userIdForQuery = userIdFromGateway;
+      supabaseClientForQuery = createAdminClient();
+      // Service role key will bypass RLS, insertProjectData uses userIdForQuery for ownership.
+    } else {
+      // Direct call, expect User JWT
+      const authHeader = req.headers.get('Authorization');
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
         });
+      }
+      supabaseClientForQuery = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      const { data: { user }, error: userError } = await supabaseClientForQuery.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: 'User not authenticated or token invalid' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
+        });
+      }
+      userIdForQuery = user.id;
     }
 
-    console.log(`Creating project "${payload.projectName}" for user ${user.id}`);
-
-    const newProjectId = await insertProjectData(supabaseClient, user.id, payload);
+    console.log(`Creating project "${payload.projectName}" for effective user_id ${userIdForQuery}`);
+    const newProjectId = await insertProjectData(supabaseClientForQuery, userIdForQuery, payload);
 
     // Fetch the newly created project with all its details to return
-    const { data: newProjectDetails, error: fetchError } = await supabaseClient
+    // Use the same client that performed the insert (could be admin or user-context)
+    const { data: newProjectDetails, error: fetchError } = await supabaseClientForQuery
       .from('projects')
       .select('id, name, description, github_repo_url, created_at, updated_at, user_id, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)')
       .eq('id', newProjectId)
+      .eq('user_id', userIdForQuery) // Ensure we only fetch if it matches the user context
       .single();
     
     if (fetchError) {
-        console.error("Error fetching newly created project details:", fetchError);
-        // Still return a success for creation, but indicate fetch error
-        return new Response(JSON.stringify({ message: "Project created, but failed to fetch full details.", project_id: newProjectId }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 201, // Created
-        });
+      console.error("Error fetching newly created project details:", fetchError);
+      return new Response(JSON.stringify({ message: "Project created, but failed to fetch full details.", project_id: newProjectId }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 201,
+      });
     }
     
     console.log("Project created successfully:", newProjectDetails);
-
     return new Response(JSON.stringify(newProjectDetails), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 201, // Created
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 201,
     });
 
   } catch (err) {
     console.error("Overall error in create-project function:", err);
+    const statusCode = err.code === '23505' ? 409 : 500; // Handle unique constraint violation
     return new Response(JSON.stringify({ error: err.message || 'Failed to create project' }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: err.code === '23505' ? 409 : 500, // Handle unique constraint violation (e.g. duplicate project name if unique)
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: statusCode,
     });
   }
 });
 
-// To deploy: supabase functions deploy create-project --project-ref <your-project-ref>
-// Example curl to test:
-// curl -X POST 'http://localhost:54321/functions/v1/create-project' \
-//   -H "Authorization: Bearer <USER_JWT_TOKEN>" \
-//   -H "Content-Type: application/json" \
-//   -d '{
-//         "projectName": "My AI Test Project",
-//         "githubRepoURL": "https://github.com/my-org/my-ai-repo",
-//         "description": "A project created via MCP for AI testing.",
-//         "guidelines": ["Use TypeScript.", "Follow TDD principles."],
-//         "scopedPaths": [
-//           {"name": "Frontend", "path_in_repo": "/frontend", "notes": "React app"},
-//           {"name": "Backend", "path_in_repo": "/backend", "notes": "Node.js API"},
-//           {"name": "Shared Lib", "notes": "Utilities shared by both."}
-//         ]
-//       }'
+// To deploy: supabase functions deploy create-project --project-ref <your-project-ref> --no-verify-jwt

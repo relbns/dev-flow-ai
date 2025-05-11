@@ -7,88 +7,110 @@ console.log("add-comment-to-task function initializing");
 interface AddCommentPayload {
   task_id: string;
   comment_text: string;
-  author_display_name?: string | null; // Optional: for AI agents or if user's name is passed directly
+  author_display_name?: string | null; 
+  user_id_from_gateway?: string; // Added for gateway calls
 }
 
-// Helper function to verify project ownership via task_id
-async function verifyTaskOwnership(supabaseClient: SupabaseClient, userId: string, taskId: string): Promise<boolean> {
+// Helper to create a Supabase client with service_role_key for admin operations
+function createAdminClient(): SupabaseClient {
+  return createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    { auth: { persistSession: false } }
+  );
+}
+
+// Updated helper function to verify task ownership using the determined userIdForQuery
+async function verifyTaskOwnership(supabaseClient: SupabaseClient, userIdForQuery: string, taskId: string): Promise<boolean> {
   const { data: task, error } = await supabaseClient
     .from('tasks')
-    .select('id, projects (user_id)') // projects!inner(user_id) might be better if RLS allows
+    .select('id, projects!inner(user_id)') 
     .eq('id', taskId)
+    .eq('projects.user_id', userIdForQuery)
     .single();
 
   if (error && error.code !== 'PGRST116') { 
     console.error("Error verifying task ownership:", error);
   }
-  // Ensure task exists and the associated project's user_id matches the current user.
-  // Note: task.projects will be null if the join fails or if RLS prevents access to the project.
-  // The RLS policy on task_comments also performs a similar check.
-  if (!task || !task.projects || task.projects.user_id !== userId) {
-    return false;
-  }
-  return true;
+  return !!task;
 }
 
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed. Only POST is accepted.' }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 405,
+    });
+  }
 
   try {
     const payload: AddCommentPayload = await req.json();
     if (!payload.task_id || !payload.comment_text || payload.comment_text.trim() === '') {
       return new Response(JSON.stringify({ error: 'task_id and non-empty comment_text are required' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
       });
     }
 
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 401,
-      });
+    let userIdForOperation: string; // User ID who is performing the action / whose behalf it's on
+    let userEmailForDisplayName: string | undefined = undefined; // For default display name
+    let supabaseClientForQuery: SupabaseClient;
+    const userIdFromGateway = payload.user_id_from_gateway;
+
+    if (userIdFromGateway) {
+      // Called by gateway
+      console.log(`add-comment-to-task called by gateway for user_id: ${userIdFromGateway}, task_id: ${payload.task_id}`);
+      userIdForOperation = userIdFromGateway;
+      supabaseClientForQuery = createAdminClient();
+      // For display name, if AI doesn't provide one, we might not have user's email easily here.
+      // The gateway could pass it, or we use a generic "AI Agent" or the API key's name.
+      // For now, if author_display_name is not in payload, it will be null for gateway calls.
+    } else {
+      // Direct call, expect User JWT
+      const authHeader = req.headers.get('Authorization');
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
+        });
+      }
+      supabaseClientForQuery = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      const { data: { user }, error: userError } = await supabaseClientForQuery.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: 'User not authenticated or token invalid' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
+        });
+      }
+      userIdForOperation = user.id;
+      userEmailForDisplayName = user.email;
     }
 
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'User not authenticated or token invalid' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 401,
-      });
-    }
-
-    // Verify task ownership
-    const isOwner = await verifyTaskOwnership(supabaseClient, user.id, payload.task_id);
+    // Verify task ownership using the determined userIdForOperation
+    const isOwner = await verifyTaskOwnership(supabaseClientForQuery, userIdForOperation, payload.task_id);
     if (!isOwner) {
       return new Response(JSON.stringify({ error: 'Task not found or access denied.' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 403, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403, 
       });
     }
     
-    console.log('Adding comment to task ' + payload.task_id + ' by user ' + user.id);
+    console.log(`Adding comment to task ${payload.task_id} by effective user_id ${userIdForOperation}`);
 
     const commentToInsert = {
       task_id: payload.task_id,
       comment_text: payload.comment_text,
-      user_id: user.id, // Associate comment with the authenticated user
-      // Use provided author_display_name, or default to user's email or a placeholder
-      author_display_name: payload.author_display_name || user.email || 'Authenticated User',
+      user_id: userIdForOperation, 
+      author_display_name: payload.author_display_name || (userIdFromGateway ? 'AI Agent' : (userEmailForDisplayName || 'User')),
     };
 
-    const { data: newComment, error: insertError } = await supabaseClient
+    // Use the same client that verified ownership for the insert
+    const { data: newComment, error: insertError } = await supabaseClientForQuery
       .from('task_comments')
       .insert(commentToInsert)
-      .select()
+      .select() // Select all columns of the newly inserted comment
       .single();
 
     if (insertError) {
@@ -99,41 +121,16 @@ serve(async (req: Request) => {
     console.log("Task comment added successfully:", newComment);
 
     return new Response(JSON.stringify(newComment), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 201, // Created
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 201,
     });
 
   } catch (err) {
     console.error("Overall error in add-comment-to-task function:", err);
-    if (err.code === '23503') { // foreign_key_violation (e.g., task_id doesn't exist)
-        return new Response(JSON.stringify({ error: 'Invalid task_id.' }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 400, 
-        });
-    }
+    const statusCode = err.code === '23503' ? 400 : 500; // foreign_key_violation
     return new Response(JSON.stringify({ error: err.message || 'Failed to add comment' }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: statusCode,
     });
   }
 });
 
-// To deploy: supabase functions deploy add-comment-to-task --project-ref <your-project-ref>
-// Example curl to test:
-// curl -X POST 'http://localhost:54321/functions/v1/add-comment-to-task' \
-//   -H "Authorization: Bearer <USER_JWT_TOKEN>" \
-//   -H "Content-Type: application/json" \
-//   -d '{
-//         "task_id": "your-task-uuid",
-//         "comment_text": "This is a test comment from an AI agent.",
-//         "author_display_name": "AI Assistant" 
-//       }'
-//
-// To test as a regular user (author_display_name will be overridden by user.email or default):
-// curl -X POST 'http://localhost:54321/functions/v1/add-comment-to-task' \
-//   -H "Authorization: Bearer <USER_JWT_TOKEN>" \
-//   -H "Content-Type: application/json" \
-//   -d '{
-//         "task_id": "your-task-uuid",
-//         "comment_text": "This is a comment from the logged-in user."
-//       }'
+// To deploy: supabase functions deploy add-comment-to-task --project-ref <your-project-ref> --no-verify-jwt
