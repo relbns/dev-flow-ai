@@ -1,69 +1,50 @@
-@supabase_url = https://xfoxoiurhhqjjhqhoaaf.supabase.co/functions/v1
+####################################################################################################
+# Variables - SET THESE!
+####################################################################################################
+
+# Supabase Cloud Instance (Remote)
+@supabase_project_ref = xfoxoiurhhqjjhqhoaaf
+@supabase_url = https://{{supabase_project_ref}}.supabase.co/functions/v1
 @supabase_anon_key = SUPABASE_ANON_KEY
 
-#YOUR_USER_JWT_HERE # Get this after logging in via GitHub OAuth
-@user_jwt = eyJhbGciOiJIUzI1NiIsImtpZCI6IlBYOVkwUFlyeWxsVmxyVloiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3hmb3hvaXVyaGhxampocWhvYWFmLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI1ZmMyMDkxYS1jODZmLTQ2NjQtODBhYy0zZjliYjljZTU0YTciLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzQ2OTMyMDY4LCJpYXQiOjE3NDY5Mjg0NjgsImVtYWlsIjoiYXJpZWxiZW5lc2hAZ21haWwuY29tIiwicGhvbmUiOiIiLCJhcHBfbWV0YWRhdGEiOnsicHJvdmlkZXIiOiJnaXRodWIiLCJwcm92aWRlcnMiOlsiZ2l0aHViIl19LCJ1c2VyX21ldGFkYXRhIjp7ImF2YXRhcl91cmwiOiJodHRwczovL2F2YXRhcnMuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3UvODUxNjEyNzk_dj00IiwiZW1haWwiOiJhcmllbGJlbmVzaEBnbWFpbC5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwiZnVsbF9uYW1lIjoiQXJpZWwgQmVuZXNoIiwiaXNzIjoiaHR0cHM6Ly9hcGkuZ2l0aHViLmNvbSIsIm5hbWUiOiJBcmllbCBCZW5lc2giLCJwaG9uZV92ZXJpZmllZCI6ZmFsc2UsInByZWZlcnJlZF91c2VybmFtZSI6InJlbGJucyIsInByb3ZpZGVyX2lkIjoiODUxNjEyNzkiLCJzdWIiOiI4NTE2MTI3OSIsInVzZXJfbmFtZSI6InJlbGJucyJ9LCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImFhbCI6ImFhbDEiLCJhbXIiOlt7Im1ldGhvZCI6Im9hdXRoIiwidGltZXN0YW1wIjoxNzQ2ODE5NDE1fV0sInNlc3Npb25faWQiOiJjYWE3YjcyOS1kYTdlLTQxNWEtOTA3ZC04ZGJjNjA2ZTExZmIiLCJpc19hbm9ueW1vdXMiOmZhbHNlfQ.bo9Ii6RX-uLAwu92boSGuVdenjO25VwJ5J7JQ3tnEKM
+# User JWT - Get this after logging into your DevFlow AI web app
+@user_jwt = PASTE_YOUR_FRESH_USER_JWT_HERE
 
-### Variables (Set these based on created resources)
-@project_id = 6de69e1c-7151-4743-b83b-cf2adbd1c931
-@gateway_project_id = c5345bd3-b24f-4084-8154-16e52778068d 
-@task_id = 369c408b-87ad-4a3c-96cd-b49d621a78e6
-@gateway_task_id = a80e5758-f790-4111-8cb5-cac476e80bb5
+# DevFlow API Key (Generated from Web UI Settings -> Integrations)
+# This key is used by AI agents to call the MCP Gateway
+@devflow_api_key = dfai_sk_94aac2cbc783cc59967b97d6242e38625d77f25512c296a98778c4e3748384db
 
-# Example, adjust as needed
-@scoped_path_name_example = "Frontend Components"
+# Local Agent Configuration (Ensure these match how your local agent is running)
+@local_agent_port = 52173
+@local_agent_host = localhost
+@local_agent_base_url = http://{{local_agent_host}}:{{local_agent_port}}
+# This is the API key you configured your local agent with (via `devflow-local-agent configure` or --api-key flag)
+@local_agent_api_key = dfai_sk_7cea784f06f6a91ef35b5c3c2eb80e1be54776d7d0033a73ca5eaf8cdc303f6f
 
-### Supabase MCP Server - V1 Toolset
 
-###
-# MCP Gateway Test - Get Task Details
-@devflow_api_key = dfai_sk_a9dd106f702b6cbd06193706ec882ecce75c6e2863659f9bc4ea20ac07766db6
+# Test Resource IDs (Update these with actual IDs from your database as needed)
+@test_project_id = 6de69e1c-7151-4743-b83b-cf2adbd1c931
+@test_task_id = a671a50d-e1af-485a-ad01-b8cba783d1e7
+@test_user_id_to_add_as_member = PASTE_USER_ID_OF_ANOTHER_USER_HERE
+@test_github_username_to_add_as_member = "testgithubuser"
 
-POST {{supabase_url}}/mcp-gateway
-Content-Type: application/json
-X-DevFlow-API-Key: {{devflow_api_key}}
 
-{
-  "tool_name": "get-task-details", 
-  "arguments": {
-    "task_id": "{{task_id}}" 
-  }
-}
+####################################################################################################
+# DevFlow AI - Supabase Cloud MCP Gateway
+# (For AI Agents interacting with Supabase-hosted data)
+####################################################################################################
 
-###
-# Delete API Key (Direct User Call)
-@api_key_to_delete = ab79dd62-a069-4fe3-8a79-94844091aba7
-#
-POST {{supabase_url}}/delete-api-key
-Authorization: Bearer {{user_jwt}}
-Content-Type: application/json
-apikey: {{supabase_anon_key}}
-
-{
-  "api_key_id": "{{api_key_to_delete}}"
-}
-
-###
-# List API Keys (Direct User Call)
-GET {{supabase_url}}/list-api-keys
-Authorization: Bearer {{user_jwt}}
-apikey: {{supabase_anon_key}} 
-
-###
-# MCP Gateway Test - List Tasks
+### MCP Gateway: Get Project Details
 # POST {{supabase_url}}/mcp-gateway
 # Content-Type: application/json
 # X-DevFlow-API-Key: {{devflow_api_key}}
 #
 # {
-#   "tool_name": "list-tasks",
-#   "arguments": {
-#     "project_id": "{{project_id}}"
-#   }
+#   "tool_name": "get-project-details",
+#   "arguments": { "project_id": "{{test_project_id}}" }
 # }
 
-###
-# MCP Gateway Test - List Projects
+### MCP Gateway: List Projects
 # POST {{supabase_url}}/mcp-gateway
 # Content-Type: application/json
 # X-DevFlow-API-Key: {{devflow_api_key}}
@@ -73,21 +54,7 @@ apikey: {{supabase_anon_key}}
 #   "arguments": {}
 # }
 
-###
-# MCP Gateway Test - Get Project Details
-# POST {{supabase_url}}/mcp-gateway
-# Content-Type: application/json
-# X-DevFlow-API-Key: {{devflow_api_key}}
-#
-# {
-#   "tool_name": "get-project-details",
-#   "arguments": {
-#     "project_id": "{{project_id}}"
-#   }
-# }
-
-###
-# MCP Gateway Test - Create Project
+### MCP Gateway: Create Project
 # POST {{supabase_url}}/mcp-gateway
 # Content-Type: application/json
 # X-DevFlow-API-Key: {{devflow_api_key}}
@@ -95,18 +62,33 @@ apikey: {{supabase_anon_key}}
 # {
 #   "tool_name": "create-project",
 #   "arguments": {
-#     "projectName": "Gateway Project Delta", 
-#     "description": "Created via the MCP Gateway!",
-#     "githubRepoURL": "https://github.com/test/gateway-delta",
-#     "guidelines": ["Guideline Delta 1"],
-#     "scopedPaths": [
-#       {"name": "Delta Frontend", "path_in_repo": "src/delta-fe", "notes": "FE for Delta"}
-#     ]
+#     "projectName": "Project Via Gateway",
+#     "description": "Test project created by AI agent.",
+#     "githubRepoURL": "https://github.com/test/gateway-project"
 #   }
 # }
 
-###
-# MCP Gateway Test - Create Task
+### MCP Gateway: Get Task Details
+# POST {{supabase_url}}/mcp-gateway
+# Content-Type: application/json
+# X-DevFlow-API-Key: {{devflow_api_key}}
+#
+# {
+#   "tool_name": "get-task-details",
+#   "arguments": { "task_id": "{{test_task_id}}" }
+# }
+
+### MCP Gateway: List Tasks for a Project
+# POST {{supabase_url}}/mcp-gateway
+# Content-Type: application/json
+# X-DevFlow-API-Key: {{devflow_api_key}}
+#
+# {
+#   "tool_name": "list-tasks",
+#   "arguments": { "project_id": "{{test_project_id}}" }
+# }
+
+### MCP Gateway: Create Task
 # POST {{supabase_url}}/mcp-gateway
 # Content-Type: application/json
 # X-DevFlow-API-Key: {{devflow_api_key}}
@@ -114,15 +96,13 @@ apikey: {{supabase_anon_key}}
 # {
 #   "tool_name": "create-task",
 #   "arguments": {
-#     "project_id": "{{gateway_project_id}}", 
-#     "title": "Gateway Task Epsilon",
-#     "description": "Task created via MCP Gateway for project.",
-#     "status": "Backlog"
+#     "project_id": "{{test_project_id}}",
+#     "title": "Gateway Created Task",
+#     "description": "This task was made by an AI agent."
 #   }
 # }
 
-###
-# MCP Gateway Test - Update Task Status
+### MCP Gateway: Update Task Status
 # POST {{supabase_url}}/mcp-gateway
 # Content-Type: application/json
 # X-DevFlow-API-Key: {{devflow_api_key}}
@@ -130,232 +110,183 @@ apikey: {{supabase_anon_key}}
 # {
 #   "tool_name": "update-task-status",
 #   "arguments": {
-#     "task_id": "{{gateway_task_id}}", 
-#     "new_status": "In Progress",
-#     "current_branch": "feature/gateway-epsilon-progress"
+#     "task_id": "{{test_task_id}}",
+#     "new_status": "In Progress"
 #   }
 # }
 
-###
-# MCP Gateway Test - Add Comment to Task (NEW)
-POST {{supabase_url}}/mcp-gateway
-Content-Type: application/json
-X-DevFlow-API-Key: {{devflow_api_key}}
+### MCP Gateway: Add Comment to Task
+# POST {{supabase_url}}/mcp-gateway
+# Content-Type: application/json
+# X-DevFlow-API-Key: {{devflow_api_key}}
+#
+# {
+#   "tool_name": "add-comment-to-task",
+#   "arguments": {
+#     "task_id": "{{test_task_id}}",
+#     "comment_text": "Comment from AI via Gateway.",
+#     "author_display_name": "AI Assistant"
+#   }
+# }
 
-{
-  "tool_name": "add-comment-to-task",
-  "arguments": {
-    "task_id": "{{gateway_task_id}}", 
-    "comment_text": "This is a comment from the AI via Gateway!",
-    "author_display_name": "Gateway AI Helper" 
-  }
-}
 
+####################################################################################################
+# DevFlow AI - Direct Supabase Function Calls (Primarily for UI interactions)
+####################################################################################################
 
-###
-# 0. Generate API Key (Legacy - for direct user testing if needed)
+### Get GitHub User Organizations (Passes client-side provider_token)
+# POST {{supabase_url}}/get-github-orgs-via-token
+# Authorization: Bearer {{user_jwt}}
+# Content-Type: application/json
+# apikey: {{supabase_anon_key}}
+#
+# {
+#   "provider_token": "PASTE_GITHUB_PROVIDER_TOKEN_FROM_BROWSER_SESSION_HERE"
+# }
+
+### Generate User API Key
 # POST {{supabase_url}}/generate-api-key
 # Authorization: Bearer {{user_jwt}}
 # Content-Type: application/json
+# apikey: {{supabase_anon_key}}
 #
 # {
-#   "name": "My Legacy Test Key" 
+#   "name": "My Test API Key"
 # }
 
-###
-# 1. Create Project (Legacy - for direct user testing if needed)
-# ... (rest of the legacy direct test blocks remain unchanged) ...
-# POST {{supabase_url}}/create-project
+### List User API Keys
+# GET {{supabase_url}}/list-api-keys
+# Authorization: Bearer {{user_jwt}}
+# apikey: {{supabase_anon_key}}
+
+### Delete User API Key
+# @api_key_id_to_delete = PASTE_API_KEY_ID_TO_DELETE_HERE
+# POST {{supabase_url}}/delete-api-key
 # Authorization: Bearer {{user_jwt}}
 # Content-Type: application/json
-# 
+# apikey: {{supabase_anon_key}}
+#
 # {
-#   "projectName": "My New AI Project",
-#   "githubRepoURL": "https://github.com/your-username/my-new-ai-project-repo",
-#   "scopedPaths": [
-#     {
-#       "name": "Frontend Components",
-#       "path": "src/components",
-#       "notes": "All React components for the UI"
-#     },
-#     {
-#       "name": "Backend API",
-#       "path": "src/api",
-#       "notes": "Express routes and controllers"
-#     }
-#   ],
-#   "guidelines": [
-#     "Use TypeScript for all new modules.",
-#     "Follow TDD for critical business logic.",
-#     "Ensure all components are responsive."
-#   ]
+#   "api_key_id": "{{api_key_id_to_delete}}"
 # }
 
-###
-# 2. Get Project Details (Legacy - for direct user testing if needed)
-# GET {{supabase_url}}/get-project-details?project_id={{project_id}}
-# Authorization: Bearer {{user_jwt}}
-
-###
-# 3. List Projects (Legacy - for direct user testing if needed)
-# GET {{supabase_url}}/list-projects
-# Authorization: Bearer {{user_jwt}}
-
-###
-# 4. Create Task (Legacy - for direct user testing if needed)
-# POST {{supabase_url}}/create-task
+### Add Project Member
+# POST {{supabase_url}}/add-project-member
 # Authorization: Bearer {{user_jwt}}
 # Content-Type: application/json
-# 
+# apikey: {{supabase_anon_key}}
+#
 # {
-#   "project_id": "{{project_id}}", 
-#   "title": "Implement User Authentication Feature",
-#   "description": "Develop the user login and registration flow using Supabase Auth.",
-#   "associated_scoped_path_name": "{{scoped_path_name_example}}" 
-# }
-
-###
-# 5. Get Task Details (Legacy - for direct user testing if needed)
-# GET {{supabase_url}}/get-task-details?task_id={{task_id}}
-# Authorization: Bearer {{user_jwt}}
-
-###
-# 6. List Tasks (Legacy - for direct user testing if needed)
-# GET {{supabase_url}}/list-tasks?project_id={{project_id}}
-# Authorization: Bearer {{user_jwt}}
-# 
-# # Optional filters:
-# # GET {{supabase_url}}/list-tasks?project_id={{project_id}}&status_filter=In Progress
-# # GET {{supabase_url}}/list-tasks?project_id={{project_id}}&scoped_path_filter={{scoped_path_name_example}}
-
-###
-# 7. Update Task Status (Legacy - for direct user testing if needed)
-# POST {{supabase_url}}/update-task-status
-# Authorization: Bearer {{user_jwt}}
-# Content-Type: application/json
-# 
-# {
-#   "task_id": "{{task_id}}",
-#   "new_status": "In Progress",
-#   "current_branch": "feature/user-auth-123",
-#   "pull_request_url": "https://github.com/your-username/my-new-ai-project-repo/pull/1"
-# }
-
-###
-# 8. Add Comment to Task (Legacy - for direct user testing if needed)
-# POST {{supabase_url}}/add-comment-to-task
-# Authorization: Bearer {{user_jwt}}
-# Content-Type: application/json
-# 
-# {
-#   "task_id": "{{task_id}}",
-#   "comment_text": "AI Agent: Starting work on this task. Will create a new branch 'feature/user-auth-ai-dev'.",
-#   "author": "AI-Agent-007" 
-# }
-
-### Local Agent MCP Server - V1 Toolset (Hosted by Local Agent CLI)
-@local_agent_url = http://localhost:52173/mcp
-
-### Get Local Agent Status
-# GET {{local_agent_url}}/status
-
-
-###
-# 1. Get Local File Content
-# POST {{local_agent_url}}/get_local_file_content
-# Content-Type: application/json
-
-# {
-#   "filePath": "README.md"
-# }
-
-###
-# POST {{local_agent_url}}/get_local_file_content
-# Content-Type: application/json
-
-# {
-#   "filePath": "packages/local-agent-cli/package.json"
-# }
-
-###
-# 2. Write Local File Content 
-# POST {{local_agent_url}}/write_local_file_content 
-# Content-Type: application/json
-
-# {
-#   "filePath": "test-from-mcp.txt",
-#   "content": "Hello from Local MCP Server!"
+#   "project_id": "{{test_project_id}}",
+#   "role": "Developer",
+#   "github_username": "{{test_github_username_to_add_as_member}}"
 # }
 
 
-###
-# 3. Execute Git Command
-# POST {{local_agent_url}}/execute_git_command
+####################################################################################################
+# DevFlow AI - Local Agent MCP Server
+# (For AI Agents interacting with local filesystem/Git)
+# Ensure your local agent is running: `devflow-local-agent start-server --api-key YOUR_KEY --root YOUR_PROJECT_ROOT`
+# or `devflow-local-agent` if configured.
+####################################################################################################
+
+### Local Agent: Get Status (Unprotected)
+GET {{local_agent_base_url}}/status
+
+### Local Agent: Get Local File Content (Success)
+# Path relative to the agent's --root directory
+POST {{local_agent_base_url}}/mcp/get_local_file_content
+Content-Type: application/json
+X-DevFlow-API-Key: {{local_agent_api_key}}
+
+{
+  "filePath": "package.json" 
+}
+
+### Local Agent: Get Local File Content (Auth Failure - wrong key)
+POST {{local_agent_base_url}}/mcp/get_local_file_content
+Content-Type: application/json
+X-DevFlow-API-Key: WRONG_API_KEY
+
+{
+  "filePath": "package.json"
+}
+
+### Local Agent: Get Local File Content (File Not Found)
+POST {{local_agent_base_url}}/mcp/get_local_file_content
+Content-Type: application/json
+X-DevFlow-API-Key: {{local_agent_api_key}}
+
+{
+  "filePath": "thisfiledoesnotexist.txt"
+}
+
+### Local Agent: Get Local File Content (Access Denied - path traversal attempt)
+# Example, adjust based on your --root
+POST {{local_agent_base_url}}/mcp/get_local_file_content
+Content-Type: application/json
+X-DevFlow-API-Key: {{local_agent_api_key}}
+
+{
+  "filePath": "../../../../../../../../../../../../etc/hosts" 
+}
+
+### Local Agent: Write Local File Content
+# Will be created/overwritten in agent's --root
+POST {{local_agent_base_url}}/mcp/write_local_file_content
+Content-Type: application/json
+X-DevFlow-API-Key: {{local_agent_api_key}}
+
+{
+  "filePath": "test-from-agent.txt", 
+  "content": "Hello from DevFlow AI Local Agent! Timestamp: {{$$datetime iso8601}}"
+}
+
+### Local Agent: List Local Files (Non-recursive)
+# List root of the agent's --root directory
+POST {{local_agent_base_url}}/mcp/list_local_files
+Content-Type: application/json
+X-DevFlow-API-Key: {{local_agent_api_key}}
+
+{
+  "directoryPath": ".", 
+  "recursive": false
+}
+
+### Local Agent: List Local Files (Recursive, specific subdir)
+# Path relative to agent's --root
+POST {{local_agent_base_url}}/mcp/list_local_files
+Content-Type: application/json
+X-DevFlow-API-Key: {{local_agent_api_key}}
+
+{
+  "directoryPath": "apps", 
+  "recursive": true
+}
+
+### Local Agent: Execute Git Command (status)
+POST {{local_agent_base_url}}/mcp/execute_git_command
+Content-Type: application/json
+X-DevFlow-API-Key: {{local_agent_api_key}}
+
+{
+  "command_args": ["status"]
+}
+
+### Local Agent: Execute Git Command (current branch)
+# POST {{local_agent_base_url}}/mcp/execute_git_command
 # Content-Type: application/json
-
-# {
-#   "command_args": ["status"]
-# }
-
-###
-# POST {{local_agent_url}}/execute_git_command
-# Content-Type: application/json
-
+# X-DevFlow-API-Key: {{local_agent_api_key}}
+#
 # {
 #   "command_args": ["rev-parse", "--abbrev-ref", "HEAD"]
 # }
 
-###
-# (Example of a command that might be disallowed by current patterns if not quoted correctly in JSON)
-# POST {{local_agent_url}}/execute_git_command
+### Local Agent: Execute Git Command (Disallowed command example)
+# POST {{local_agent_base_url}}/mcp/execute_git_command
 # Content-Type: application/json
-
+# X-DevFlow-API-Key: {{local_agent_api_key}}
+#
 # {
-#   "command_args": ["commit", "-m", "Test message with spaces"] 
-# }
-
-### 
-# Execute Git Command via MCP - create branch
-# POST {{local_agent_url}}/execute_git_command
-# Content-Type: application/json
-
-# {
-#   "command_args": ["checkout", "-b", "test-mcp-branch"]
-# }
-
-### Execute Git Command via MCP - switch branch
-# POST {{local_agent_url}}/execute_git_command
-# Content-Type: application/json
-
-# {
-#   "command_args": ["checkout", "master"]
-# }
-
-### Execute Git Command via MCP - disallowed
-# POST {{local_agent_url}}/execute_git_command
-# Content-Type: application/json
-
-# {
-#   "command_args": ["branch", "--all"] 
-# }
-
-
-###
-# 4. List Local Files (Non-recursive)
-# POST {{local_agent_url}}/list_local_files
-# Content-Type: application/json
-
-# {
-#   "directoryPath": ".",
-#   "recursive": false
-# }
-
-###
-# 4. List Local Files (Recursive)
-# POST {{local_agent_url}}/list_local_files
-# Content-Type: application/json
-
-# {
-#   "directoryPath": "./apps",
-#   "recursive": true
+#   "command_args": ["config", "--global", "user.name"] # This should be disallowed
 # }
