@@ -11,6 +11,16 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { fileURLToPath } from 'url';
 import { readConfig, writeConfig } from './configManager.js';
+import {
+  Server as McpServer
+} from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  ErrorCode,
+  ListToolsRequestSchema,
+  McpError,
+} from '@modelcontextprotocol/sdk/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,30 +43,33 @@ function stripAnsi(str) {
   return str.replace(ansiRegex, '');
 }
 
-function getFileContent(filePath, basePath) {
-  const absolutePath = path.resolve(basePath, filePath);
-  if (!absolutePath.startsWith(path.resolve(basePath))) {
-    throw new Error(`Access denied: File path is outside the allowed project root.`);
+// basePath parameter changed to projectRoot for clarity and consistency
+function getFileContent(filePath, projectRoot) {
+  const absoluteFilePath = path.resolve(projectRoot, filePath);
+  if (!absoluteFilePath.startsWith(path.resolve(projectRoot))) {
+    throw new Error(`Access denied: File path "${filePath}" is outside the allowed project root "${projectRoot}".`);
   }
-  if (!fs.existsSync(absolutePath)) {
-    throw new Error(`File not found at ${absolutePath}`);
+  if (!fs.existsSync(absoluteFilePath)) {
+    throw new Error(`File not found at ${absoluteFilePath}`);
   }
-  return fs.readFileSync(absolutePath, 'utf8');
+  return fs.readFileSync(absoluteFilePath, 'utf8');
 }
 
-function writeLocalFileContent(filePath, content, basePath) {
-  const absolutePath = path.resolve(basePath, filePath);
-  if (!absolutePath.startsWith(path.resolve(basePath))) {
-    throw new Error(`Access denied: File path is outside the allowed project root.`);
+// basePath parameter changed to projectRoot
+function writeLocalFileContent(filePath, content, projectRoot) {
+  const absoluteFilePath = path.resolve(projectRoot, filePath);
+  if (!absoluteFilePath.startsWith(path.resolve(projectRoot))) {
+    throw new Error(`Access denied: File path "${filePath}" is outside the allowed project root "${projectRoot}".`);
   }
-  fs.writeFileSync(absolutePath, content, 'utf8');
-  return `Content successfully written to ${absolutePath}`;
+  fs.writeFileSync(absoluteFilePath, content, 'utf8');
+  return `Content successfully written to ${absoluteFilePath}`;
 }
 
-function listLocalFiles(directoryPath, recursive = false, basePath, ignorePatterns = ['node_modules', '.git', '.DS_Store']) {
-  const resolvedPathToList = path.resolve(basePath, directoryPath);
-  if (!resolvedPathToList.startsWith(path.resolve(basePath))) {
-    throw new Error(`Access denied: Directory path is outside the allowed project root.`);
+// basePath parameter changed to projectRoot
+function listLocalFiles(directoryPath, recursive = false, projectRoot, ignorePatterns = ['node_modules', '.git', '.DS_Store']) {
+  const resolvedPathToList = path.resolve(projectRoot, directoryPath);
+  if (!resolvedPathToList.startsWith(path.resolve(projectRoot))) {
+    throw new Error(`Access denied: Directory path "${directoryPath}" is outside the allowed project root "${projectRoot}".`);
   }
   if (!fs.existsSync(resolvedPathToList) || !fs.lstatSync(resolvedPathToList).isDirectory()) {
     throw new Error(`Path is not a directory: ${resolvedPathToList}`);
@@ -66,12 +79,16 @@ function listLocalFiles(directoryPath, recursive = false, basePath, ignorePatter
   for (const item of items) {
     const itemName = item.name;
     if (ignorePatterns.includes(itemName)) continue;
-    const itemRelativePath = path.join(directoryPath, itemName);
+    const itemRelativePath = path.join(directoryPath, itemName); // Relative to the directoryPath being listed
+    const fullItemPath = path.join(resolvedPathToList, itemName); // Full path for recursive calls
+
     if (item.isDirectory()) {
       filesOutput.push({ name: itemName, type: 'directory', path: itemRelativePath.replace(/\\/g, '/') });
       if (recursive) {
-        const subFiles = listLocalFiles(path.join(directoryPath, itemName), true, basePath, ignorePatterns);
-        filesOutput.push(...subFiles.map(sf => ({...sf, path: path.join(itemName, sf.path).replace(/\\/g, '/')})));
+        // Pass projectRoot to recursive calls
+        const subFiles = listLocalFiles(itemRelativePath, true, projectRoot, ignorePatterns);
+        // Adjust sub-file paths to be relative to the initial directoryPath
+        filesOutput.push(...subFiles.map(sf => ({ ...sf, path: path.join(itemName, sf.path).replace(/\\/g, '/') })));
       }
     } else {
       filesOutput.push({ name: itemName, type: 'file', path: itemRelativePath.replace(/\\/g, '/') });
@@ -80,23 +97,33 @@ function listLocalFiles(directoryPath, recursive = false, basePath, ignorePatter
   return filesOutput;
 }
 
-function executeGitCommandUtility(gitArgsArray, cwd) {
+// executionCwd is the directory where the git command will run (relative to projectRoot or absolute)
+// projectRoot is the overall sandbox for this operation
+function executeGitCommandUtility(gitArgsArray, executionCwd, projectRoot) {
   const commandString = gitArgsArray.join(' ');
   const allowedCommandPatterns = [
-    /^status(?: -s)?$/, /^rev-parse --abbrev-ref HEAD$/, /^checkout -b [\w.-]+$/, 
-    /^checkout [\w.-]+$/, /^add (?:[\w.-/]+|\.)$/, /^commit -m ".+"$/, 
+    /^status(?: -s)?$/, /^rev-parse --abbrev-ref HEAD$/, /^checkout -b [\w.-]+$/,
+    /^checkout [\w.-]+$/, /^add (?:[\w.-/]+|\.)$/, /^commit -m ".+"$/,
     /^push(?: [\w.-]+ [\w.-]+)?$/, /^pull(?: [\w.-]+ [\w.-]+)?$/, /^branch$/,
     /^log(?: -\d+)?(?: --oneline)?(?: --graph)?(?: --decorate)?(?: --all)?$/
   ];
+
   if (!allowedCommandPatterns.some(pattern => pattern.test(commandString))) {
     const err = new Error(`Command "git ${commandString}" is not allowed.`);
-    err.allowedPatternsExamples = [ /* ... examples ... */ ];
+    // Consider adding examples if this error is hit often by users
+    // err.allowedPatternsExamples = [ "status", "log -1", "add .", "commit -m \"My commit\"" ];
     throw err;
   }
-  if (!path.resolve(cwd).startsWith(path.resolve(currentProjectRoot))) {
-      throw new Error(`Git command CWD is outside allowed project root. CWD: ${cwd}, Root: ${currentProjectRoot}`);
+
+  const absoluteExecutionCwd = path.resolve(projectRoot, executionCwd);
+  if (!absoluteExecutionCwd.startsWith(path.resolve(projectRoot))) {
+    throw new Error(`Git command CWD "${executionCwd}" (resolves to "${absoluteExecutionCwd}") is outside allowed project root "${projectRoot}".`);
   }
-  return execSync(`git ${commandString}`, { cwd, encoding: 'utf8' });
+  if (!fs.existsSync(absoluteExecutionCwd) || !fs.lstatSync(absoluteExecutionCwd).isDirectory()) {
+    throw new Error(`Git command CWD "${absoluteExecutionCwd}" is not a valid directory.`);
+  }
+
+  return execSync(`git ${commandString}`, { cwd: absoluteExecutionCwd, encoding: 'utf8' });
 }
 
 // --- Express App Setup ---
@@ -129,7 +156,8 @@ app.post('/mcp/:toolName', async (req, res) => {
       case 'get_local_file_content': result = getFileContent(args.filePath, currentProjectRoot); break;
       case 'write_local_file_content': result = writeLocalFileContent(args.filePath, args.content, currentProjectRoot); break;
       case 'list_local_files': result = listLocalFiles(args.directoryPath, args.recursive, currentProjectRoot, args.ignore); break;
-      case 'execute_git_command': result = { output: executeGitCommandUtility(args.command_args, currentProjectRoot).trim() }; break;
+      // For HTTP server, executionCwd for git is currentProjectRoot, and projectRoot (sandbox) is also currentProjectRoot
+      case 'execute_git_command': result = { output: executeGitCommandUtility(args.command_args, currentProjectRoot, currentProjectRoot).trim() }; break;
       default: return res.status(404).json({ error: `Tool "${toolName}" not found.` });
     }
     res.json({ result });
@@ -249,6 +277,173 @@ program
       console.error(chalk.red('Failed to save configuration:'), error.message);
     }
   });
+
+// --- Stdio MCP Server Setup ---
+const startStdioMcpServerAction = async () => {
+  const apiKey = process.env.DEVFLOW_API_KEY; // API key provided by MCP host
+  const maxRoot = process.env.DEVFLOW_MAX_ROOT ? path.resolve(process.env.DEVFLOW_MAX_ROOT) : null; // Optional overall sandbox
+
+  if (!apiKey) {
+    console.error(chalk.red('Error: DEVFLOW_API_KEY environment variable is required for stdio MCP mode.'));
+    process.exit(1);
+  }
+
+  if (maxRoot && (!fs.existsSync(maxRoot) || !fs.lstatSync(maxRoot).isDirectory())) {
+    console.error(chalk.red(`Error: DEVFLOW_MAX_ROOT "${maxRoot}" is not a valid directory.`));
+    process.exit(1);
+  }
+
+  const mcpServer = new McpServer(
+    {
+      name: 'devflow-local-agent-mcp',
+      version: packageJson.version,
+    },
+    {
+      capabilities: {
+        tools: {}, // Tools will be dynamically listed
+      },
+    }
+  );
+
+  mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: 'get_local_file_content',
+        description: 'Reads the content of a file from the local filesystem, relative to a specified project root.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            projectRoot: { type: 'string', description: 'Absolute path to the project root directory.' },
+            filePath: { type: 'string', description: 'Path to the file, relative to projectRoot.' },
+          },
+          required: ['projectRoot', 'filePath'],
+        },
+      },
+      {
+        name: 'write_local_file_content',
+        description: 'Writes content to a file on the local filesystem, relative to a specified project root.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            projectRoot: { type: 'string', description: 'Absolute path to the project root directory.' },
+            filePath: { type: 'string', description: 'Path to the file, relative to projectRoot.' },
+            content: { type: 'string', description: 'The content to write to the file.' },
+          },
+          required: ['projectRoot', 'filePath', 'content'],
+        },
+      },
+      {
+        name: 'list_local_files',
+        description: 'Lists files and directories within a path, relative to a specified project root.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            projectRoot: { type: 'string', description: 'Absolute path to the project root directory.' },
+            directoryPath: { type: 'string', description: 'Path to the directory to list, relative to projectRoot.' },
+            recursive: { type: 'boolean', default: false, description: 'Whether to list files recursively.' },
+            ignore: { type: 'array', items: { type: 'string' }, description: 'Array of patterns to ignore.' },
+          },
+          required: ['projectRoot', 'directoryPath'],
+        },
+      },
+      {
+        name: 'execute_git_command',
+        description: 'Executes a Git command within a specified execution CWD, sandboxed by a project root.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            projectRoot: { type: 'string', description: 'Absolute path to the overall project root (sandbox).' },
+            executionCwd: { type: 'string', default: '.', description: 'Path where the git command should execute, relative to projectRoot.' },
+            command_args: { type: 'array', items: { type: 'string' }, description: 'Array of arguments for the git command (e.g., ["status"]).' },
+          },
+          required: ['projectRoot', 'command_args'],
+        },
+      },
+    ],
+  }));
+
+  mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    // API Key validation for stdio mode (could also be a middleware if MCP SDK supports it easily)
+    // For now, checking it directly in the CallTool handler.
+    // The API key is passed via env var by the MCP host, not in the tool call itself.
+    // This is a server-to-server auth, not client-to-server per call.
+
+    const { name, arguments: args } = request.params;
+
+    if (!args || typeof args !== 'object' || !args.projectRoot || typeof args.projectRoot !== 'string') {
+      throw new McpError(ErrorCode.InvalidParams, `Tool "${name}" requires a "projectRoot" string argument.`);
+    }
+
+    const callProjectRoot = path.resolve(args.projectRoot);
+
+    if (!path.isAbsolute(callProjectRoot)) {
+        throw new McpError(ErrorCode.InvalidParams, `"projectRoot" ("${callProjectRoot}") must be an absolute path.`);
+    }
+    if (maxRoot && !callProjectRoot.startsWith(maxRoot)) {
+      throw new McpError(ErrorCode.PermissionDenied, `Access denied: projectRoot "${callProjectRoot}" is outside the configured DEVFLOW_MAX_ROOT "${maxRoot}".`);
+    }
+    if (!fs.existsSync(callProjectRoot) || !fs.lstatSync(callProjectRoot).isDirectory()) {
+        throw new McpError(ErrorCode.InvalidParams, `projectRoot "${callProjectRoot}" is not a valid directory.`);
+    }
+
+    try {
+      let result;
+      switch (name) {
+        case 'get_local_file_content':
+          if (!args.filePath || typeof args.filePath !== 'string') throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid filePath argument.');
+          result = getFileContent(args.filePath, callProjectRoot);
+          break;
+        case 'write_local_file_content':
+          if (!args.filePath || typeof args.filePath !== 'string') throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid filePath argument.');
+          if (typeof args.content !== 'string') throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid content argument.');
+          result = writeLocalFileContent(args.filePath, args.content, callProjectRoot);
+          break;
+        case 'list_local_files':
+          if (!args.directoryPath || typeof args.directoryPath !== 'string') throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid directoryPath argument.');
+          result = listLocalFiles(args.directoryPath, args.recursive, callProjectRoot, args.ignore);
+          break;
+        case 'execute_git_command':
+          if (!args.command_args || !Array.isArray(args.command_args)) throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid command_args array.');
+          const execCwd = args.executionCwd && typeof args.executionCwd === 'string' ? args.executionCwd : '.';
+          result = { output: executeGitCommandUtility(args.command_args, execCwd, callProjectRoot).trim() };
+          break;
+        default:
+          throw new McpError(ErrorCode.MethodNotFound, `Tool "${name}" not found.`);
+      }
+      return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }] };
+    } catch (error) {
+      console.error(chalk.red(`[MCP Stdio Error] Error executing tool ${name}:`), stripAnsi(error.message));
+      // Ensure error is an McpError or wrap it
+      if (error instanceof McpError) throw error;
+      throw new McpError(ErrorCode.InternalError, stripAnsi(error.message));
+    }
+  });
+  
+  mcpServer.onerror = (error) => {
+    // Log to stderr so MCP host can see it
+    console.error(chalk.red('[MCP Stdio Unhandled Error]'), error);
+  };
+
+  process.on('SIGINT', async () => {
+    await mcpServer.close();
+    process.exit(0);
+  });
+  process.on('SIGTERM', async () => {
+    await mcpServer.close();
+    process.exit(0);
+  });
+
+  const transport = new StdioServerTransport();
+  await mcpServer.connect(transport);
+  // Log to stderr so it doesn't interfere with stdout JSON messages
+  console.error(chalk.green.bold('DevFlow AI Local Agent running in Stdio MCP mode.'));
+  console.error(chalk.blue(`API Key loaded from DEVFLOW_API_KEY. DEVFLOW_MAX_ROOT: ${maxRoot || 'Not set'}`));
+};
+
+program
+  .command('mcp-stdio')
+  .description('Starts the Local Agent in Stdio MCP mode for integration with MCP hosts.')
+  .action(startStdioMcpServerAction);
 
 
 // ... (add back other direct CLI commands like get-file-content, git, list-files, write-file-content if needed, adapting them to use program.opts() for global options like --root)
