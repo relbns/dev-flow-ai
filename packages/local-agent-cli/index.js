@@ -2,7 +2,7 @@
 
 import dotenv from 'dotenv';
 import { Command } from 'commander';
-import fs from 'fs';
+import fs from 'fs-extra'; // Changed from 'fs' to 'fs-extra'
 import path from 'path';
 import { execSync } from 'child_process';
 import express from 'express';
@@ -61,8 +61,16 @@ function writeLocalFileContent(filePath, content, projectRoot) {
   if (!absoluteFilePath.startsWith(path.resolve(projectRoot))) {
     throw new Error(`Access denied: File path "${filePath}" is outside the allowed project root "${projectRoot}".`);
   }
-  fs.writeFileSync(absoluteFilePath, content, 'utf8');
-  return `Content successfully written to ${absoluteFilePath}`;
+  try {
+    fs.outputFileSync(absoluteFilePath, content, 'utf8'); // Use fs-extra's outputFileSync
+    return `Content successfully written to ${absoluteFilePath}`;
+  } catch (error) {
+    // Provide a more specific error if it's about directory creation, though outputFileSync handles it.
+    // For other errors, rethrow them wrapped in McpError or as is if already an McpError.
+    console.error(chalk.red(`[writeLocalFileContent Error] Failed to write file "${filePath}":`), stripAnsi(error.message));
+    if (error instanceof McpError) throw error; // Already an McpError
+    throw new McpError(ErrorCode.InternalError, `Failed to write file: ${stripAnsi(error.message)}`);
+  }
 }
 
 // basePath parameter changed to projectRoot
