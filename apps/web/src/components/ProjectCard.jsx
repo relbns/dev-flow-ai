@@ -16,7 +16,7 @@ import {
   AlertDialogTitle, 
   AlertDialogTrigger 
 } from '@/components/ui/alert-dialog'; // Import AlertDialog components
-import { Clock, MoreVertical, Users, Edit, Trash2, AlertCircle, ExternalLink, Eye } from 'lucide-react'; 
+import { Clock, MoreVertical, Users, Edit, Trash2, AlertCircle, ExternalLink, Eye, User } from 'lucide-react'; // Added User
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { useToast } from "@/hooks/use-toast"; 
 import { supabase } from '@/lib/supabaseClient'; // Using @ alias
@@ -173,8 +173,15 @@ const ProjectCard = ({ project, onProjectDeleted }) => {
       </CardContent>
       <CardFooter className="pt-2 flex items-center justify-between text-sm text-muted-foreground">
         <div className="flex items-center gap-2">
+          {/* Display Leader User ID */}
+          {project.leader_user_id && (
+            <div className="flex items-center gap-1" title={`Leader User ID: ${project.leader_user_id}`}>
+              <User className="h-4 w-4" />
+              <span className="truncate max-w-[100px]">Leader: {project.leader_user_id.substring(0, 8)}...</span> 
+            </div>
+          )}
           {/* project.members is not in Supabase data yet */}
-          {/* <Users className="h-4 w-4" />
+          {/* <Users className="h-4 w-4 ml-4" /> 
           <span>{project.members || 'N/A'} members</span> */}
         </div>
         <div className="flex items-center gap-2">

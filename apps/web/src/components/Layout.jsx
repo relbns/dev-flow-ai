@@ -36,45 +36,77 @@ const Layout = () => {
   }, []);
 
   // Effect to fetch GitHub organizations when session (and provider_token) is available
-  // useEffect(() => {
-  //   const fetchUserOrganizations = async () => {
-  //     console.log("Layout.jsx: Checking session for provider_token. Full session object:", JSON.stringify(session, null, 2)); 
-  //     if (session?.provider_token) {
-  //       console.log("Layout.jsx: Found provider_token:", session.provider_token, "Attempting to fetch orgs.");
-  //       setLoadingOrgs(true);
-  //       try {
-  //         const { data: orgsData, error: orgsError } = await supabase.functions.invoke(
-  //           'get-github-orgs-via-token',
-  //           {
-  //             method: 'POST',
-  //             body: { provider_token: session.provider_token },
-  //           }
-  //         );
-  //         if (orgsError) throw orgsError;
-  //         setOrganizations(orgsData || []);
-  //       } catch (error) {
-  //         console.error("Error fetching GitHub organizations:", error);
-  //         toast({
-  //           title: "Could not fetch GitHub organizations",
-  //           description: error.message,
-  //           variant: "destructive",
-  //         });
-  //         setOrganizations([]); 
-  //       } finally {
-  //         setLoadingOrgs(false);
-  //       }
-  //     } else if (session && !session.provider_token) {
-  //       setOrganizations([]); 
-  //        console.warn("Layout.jsx: Session exists but provider_token is missing. Orgs will not be fetched.");
-  //     } else if (!session) {
-  //       console.log("Layout.jsx: No session available. Orgs will not be fetched.");
-  //       setOrganizations([]);
-  //     }
-  //   };
+  useEffect(() => {
+    // Explicitly wait if session is still in its initial null state
+    if (session === null) {
+      console.log("Layout.jsx: Session state not yet determined. Waiting...");
+      return; // Don't proceed until the first effect has potentially set the session
+    }
 
-  //   fetchUserOrganizations();
-  // }, [session?.provider_token, session?.user?.id, toast]); 
-  // Commented out for now: Organization fetching is deferred. `organizations` state will remain [].
+    const fetchUserOrganizations = async () => {
+      console.log("Layout.jsx: Session state determined. Checking for provider_token.");
+      if (session?.provider_token) { // Now check the determined session object
+        console.log("Layout.jsx: Found provider_token, attempting to fetch orgs.");
+        setLoadingOrgs(true);
+        try {
+          // Ensure the function name matches the deployed function
+          // The function now expects POST and the provider_token in the body
+          const { data: orgsData, error: orgsError } = await supabase.functions.invoke(
+            'get-github-user-organizations',
+            {
+              method: 'POST',
+              body: { provider_token: session.provider_token }, // Send token in body
+            }
+          );
+
+          if (orgsError) {
+             // Check if it's the specific provider_token missing error
+            if (orgsError.context?.status === 403 && orgsError.message?.includes('provider_token not found')) {
+              console.warn("Layout.jsx: Failed to fetch orgs due to missing provider_token (403). Prompting re-login.");
+              toast({
+                title: "GitHub Connection Issue",
+                description: "Could not fetch organizations. Please log out and log back in with GitHub to refresh your connection and ensure 'read:org' permissions are granted.",
+                variant: "warning", // Use warning variant
+                duration: 9000, // Longer duration
+              });
+            } else {
+              // Throw other errors to be caught below
+              throw orgsError;
+            }
+            setOrganizations([]); // Clear orgs on error
+          } else {
+            console.log("Layout.jsx: Orgs fetched successfully:", orgsData);
+            setOrganizations(orgsData || []);
+          }
+        } catch (error) { // Catch errors thrown from above or other unexpected errors
+          console.error("Error fetching GitHub organizations:", error);
+          // Avoid showing the raw error message if it was the handled 403
+          if (!(error.context?.status === 403 && error.message?.includes('provider_token not found'))) {
+            toast({
+              title: "Could not fetch GitHub organizations",
+              description: error.message || "An unexpected error occurred.",
+              variant: "destructive",
+            });
+          }
+          setOrganizations([]); 
+        } finally {
+          setLoadingOrgs(false);
+        }
+      } else if (session && !session.provider_token) {
+        setOrganizations([]); 
+         console.warn("Layout.jsx: Session exists but provider_token is missing. Orgs will not be fetched.");
+      } else if (!session) {
+        console.log("Layout.jsx: No session available. Orgs will not be fetched.");
+        setOrganizations([]);
+      } else { // This case now correctly means session is known to be null (logged out)
+        console.log("Layout.jsx: No session available (user logged out). Orgs will not be fetched.");
+        setOrganizations([]);
+      }
+    };
+
+    fetchUserOrganizations();
+    // Depend on the session object itself. The function logic handles null/token presence.
+  }, [session, toast]); 
 
   const handleContextChange = (type, orgData = null) => {
     setContextType(type);

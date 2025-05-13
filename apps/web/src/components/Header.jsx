@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -10,13 +9,28 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Bell, User, Building, ChevronLeft, LogIn } from 'lucide-react'; // Added LogIn
+import {
+  Bell,
+  User,
+  Building,
+  ChevronLeft,
+  LogIn,
+  RefreshCw,
+} from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import { Badge } from '@/components/ui/badge';
-import { useToast } from "@/hooks/use-toast";
+import { useToast } from '@/hooks/use-toast';
 import { supabase } from '../lib/supabaseClient'; // Import supabase
 
-const Header = ({ title, contextType, organization, organizations = [], onContextChange, session }) => { // Added session prop
+const Header = ({
+  title,
+  contextType,
+  organization,
+  organizations = [],
+  onContextChange,
+  session,
+}) => {
+  // Added session prop
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
@@ -28,16 +42,20 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
         options: {
           scopes: 'read:org repo user:email',
           redirectTo: window.location.origin, // Redirect back to current page after login
+          queryParams: {
+            access_type: 'offline', // Request a refresh token
+            prompt: 'consent',
+          },
         },
       });
       if (error) throw error;
     } catch (error) {
       toast({
-        title: "Login Error",
+        title: 'Login Error',
         description: error.error_description || error.message,
-        variant: "destructive",
+        variant: 'destructive',
       });
-      console.error("Error logging in with GitHub:", error);
+      console.error('Error logging in with GitHub:', error);
     }
   }
 
@@ -47,58 +65,63 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
       if (error) throw error;
       // Session will be cleared by onAuthStateChange in Layout, no need to navigate here explicitly
       // unless you want to force a redirect to a public page.
-      toast({ title: "Logged out", description: "You have been successfully logged out." });
+      toast({
+        title: 'Logged out',
+        description: 'You have been successfully logged out.',
+      });
     } catch (error) {
       toast({
-        title: "Logout Error",
+        title: 'Logout Error',
         description: error.error_description || error.message,
-        variant: "destructive",
+        variant: 'destructive',
       });
-      console.error("Error logging out:", error);
+      console.error('Error logging out:', error);
     }
   }
-  
+
   const handleBack = () => {
     // Go up one level in the hierarchy
     const path = location.pathname;
-    
+
     if (path.includes('/projects/')) {
       // From specific project to projects list
       navigate('/projects');
-    }
-    else if (path.includes('/tasks/')) {
+    } else if (path.includes('/tasks/')) {
       // From specific task to tasks list
       navigate('/tasks');
-    }
-    else if (path.includes('/settings/')) {
+    } else if (path.includes('/settings/')) {
       // If we're in a settings subpage, go back to main settings
       if (path !== '/settings') {
         navigate('/settings');
       } else {
         navigate('/');
       }
-    }
-    else {
+    } else {
       // For any other case, go to the root
       navigate('/');
     }
   };
-  
+
   // Check if we're not on the root page
   const shouldShowBackButton = location.pathname !== '/';
-  
+
   return (
     <header className="border-b border-border px-6 py-3 bg-background sticky top-0 z-10">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           {shouldShowBackButton && (
-            <Button variant="ghost" size="icon" onClick={handleBack} className="mr-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleBack}
+              className="mr-2"
+            >
               <ChevronLeft className="h-5 w-5" />
             </Button>
           )}
           <h1 className="text-xl font-semibold truncate">{title}</h1>
         </div>
-        
+
         <div className="flex items-center space-x-3">
           {/* Context Switcher */}
           <DropdownMenu>
@@ -112,8 +135,13 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
                 ) : (
                   <>
                     <Building className="h-4 w-4" />
-                    <span className="hidden sm:inline">{organization?.name}</span>
-                    <Badge variant="outline" className="ml-1 text-xs hidden sm:inline-flex">
+                    <span className="hidden sm:inline">
+                      {organization?.name}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className="ml-1 text-xs hidden sm:inline-flex"
+                    >
                       Organization
                     </Badge>
                   </>
@@ -135,20 +163,32 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
                 Organizations
               </div>
 
-              {Array.isArray(organizations) && organizations.map((org) => (
-                <DropdownMenuItem
-                  key={org.id}
-                  className="cursor-pointer"
-                  onClick={() => onContextChange('organization', org)}
-                >
-                  <Building className="mr-2 h-4 w-4" />
-                  <span>{org.name}</span>
-                </DropdownMenuItem>
-              ))}
-              {/* "Create/Join Organization" is removed as orgs are now from GitHub */}
+              {Array.isArray(organizations) &&
+                organizations.map((org) => (
+                  <DropdownMenuItem
+                    key={org.id}
+                    className="cursor-pointer"
+                    // Pass the correct structure expected by onContextChange, using org.login and other fields from the fetched data
+                    onClick={() => onContextChange('organization', { id: org.id, name: org.login, avatar_url: org.avatar_url })}
+                  >
+                    <Building className="mr-2 h-4 w-4" />
+                    {/* Display org.login as the name */}
+                    <span>{org.login}</span> 
+                  </DropdownMenuItem>
+                ))}
+              
+              {/* Add Request Permissions Item */}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="cursor-pointer text-muted-foreground"
+                onClick={handleLoginWithGitHub} // Re-use login function to prompt consent
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                <span>Request Org Permissions</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          
+
           {/* Notifications */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -162,25 +202,41 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
               <DropdownMenuSeparator />
               <div className="max-h-80 overflow-auto">
                 {[1, 2, 3].map((i) => (
-                  <DropdownMenuItem key={i} className="py-2 px-4 cursor-pointer" onClick={() => toast({ title: "Notification clicked", description: "This would navigate to the item."})}>
+                  <DropdownMenuItem
+                    key={i}
+                    className="py-2 px-4 cursor-pointer"
+                    onClick={() =>
+                      toast({
+                        title: 'Notification clicked',
+                        description: 'This would navigate to the item.',
+                      })
+                    }
+                  >
                     <div>
                       <p className="text-sm font-medium">New task assigned</p>
-                      <p className="text-xs text-muted-foreground">Jane assigned you a task in API Project</p>
-                      <p className="text-xs text-muted-foreground mt-1">2 hours ago</p>
+                      <p className="text-xs text-muted-foreground">
+                        Jane assigned you a task in API Project
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        2 hours ago
+                      </p>
                     </div>
                   </DropdownMenuItem>
                 ))}
               </div>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer justify-center font-medium" onClick={() => navigate('/notifications')}>
+              <DropdownMenuItem
+                className="cursor-pointer justify-center font-medium"
+                onClick={() => navigate('/notifications')}
+              >
                 View all notifications
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          
+
           {/* Theme Toggle */}
           <ThemeToggle />
-          
+
           {/* User Menu / Login Button */}
           {session?.user ? (
             <DropdownMenu>
@@ -189,7 +245,10 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
                   {session.user.user_metadata?.avatar_url ? (
                     <img
                       src={session.user.user_metadata.avatar_url}
-                      alt={session.user.user_metadata?.full_name || session.user.email}
+                      alt={
+                        session.user.user_metadata?.full_name ||
+                        session.user.email
+                      }
                       className="h-6 w-6 rounded-full"
                     />
                   ) : (
@@ -202,10 +261,21 @@ const Header = ({ title, contextType, organization, organizations = [], onContex
                   {session.user.user_metadata?.full_name || session.user.email}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate('/settings/profile')}>Profile</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate('/settings')}>Settings</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate('/settings/profile')}>
+                  Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate('/settings')}>
+                  Settings
+                </DropdownMenuItem>
+                {!session.provider_token && (
+                  <DropdownMenuItem onClick={handleLoginWithGitHub}>
+                    <RefreshCw className="mr-2 h-4 w-4" /> Reconnect GitHub
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout}>Log out</DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout}>
+                  Log out
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (

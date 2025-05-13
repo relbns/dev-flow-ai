@@ -172,25 +172,28 @@ const Projects = () => {
       setLoadingProjects(false);
       return;
     }
+
+    // Determine the orgId to pass to the function
+    let orgIdToPass = undefined; // Removed type annotation
+    if (contextType === 'organization' && selectedOrganization) {
+      // Assuming selectedOrganization has an 'id' property which is the GitHub org ID
+      orgIdToPass = selectedOrganization.id;
+    } else if (contextType === 'personal') {
+      orgIdToPass = 'personal'; // Use the special string 'personal'
+    }
+    // If contextType is neither 'organization' nor 'personal', orgIdToPass remains undefined, 
+    // and the function should return all projects for the user.
+
     try {
-      let query = supabase
-        .from('projects')
-        .select('*, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)') // Fetch related data too
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false });
+      console.log(`Invoking list-projects function with orgId: ${orgIdToPass}`);
+      const { data, error } = await supabase.functions.invoke('list-projects', {
+        method: 'POST', // Use POST to send body easily
+        body: { orgId: orgIdToPass }, // Pass orgId in the body
+      });
 
-      if (contextType === 'organization' && selectedOrganization) {
-        query = query.eq('github_org_id', selectedOrganization.id);
-      } else if (contextType === 'personal') {
-        query = query.is('github_org_id', null);
-      }
-      // If contextType is 'all' or something else, no org filter is applied (shows all user's projects)
-      // For now, 'personal' means no org_id, 'organization' means specific org_id.
-
-      const { data, error } = await query;
-      
       if (error) throw error;
-      setProjects(data || []);
+      // The function now returns the projects array directly
+      setProjects(data || []); 
     } catch (error) {
       console.error('Error fetching projects:', error);
       toast({ title: "Error Fetching Projects", description: error.message, variant: "destructive" });

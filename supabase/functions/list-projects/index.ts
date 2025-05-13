@@ -19,8 +19,38 @@ serve(async (req: Request) => {
   }
 
   try {
-    const url = new URL(req.url);
-    const userIdFromGateway = url.searchParams.get('user_id_from_gateway');
+    let orgIdParam: string | number | null = null;
+    let userIdFromGateway: string | null = null;
+    let requestBody: any = null;
+
+    // Try parsing query parameters for GET or direct calls
+    try {
+      const url = new URL(req.url);
+      userIdFromGateway = url.searchParams.get('user_id_from_gateway');
+      orgIdParam = url.searchParams.get('orgId');
+    } catch (e) {
+      console.warn("Could not parse URL, likely not a standard HTTP request:", e.message);
+    }
+
+    // If invoked via POST (e.g., functions.invoke), try parsing body
+    if (req.method === 'POST' && req.body) {
+      try {
+        requestBody = await req.json();
+        // Allow orgId from body to override query param if both present
+        if (requestBody?.orgId !== undefined) {
+          orgIdParam = requestBody.orgId;
+          console.log("Read orgId from POST body:", orgIdParam);
+        }
+        // Allow userId from body (if gateway pattern changes)
+        if (requestBody?.user_id_from_gateway) {
+           userIdFromGateway = requestBody.user_id_from_gateway;
+           console.log("Read user_id_from_gateway from POST body:", userIdFromGateway);
+        }
+      } catch (e) {
+        console.warn("Could not parse POST body as JSON:", e.message);
+        // Don't fail, maybe it wasn't JSON or body was empty
+      }
+    }
 
     let userIdForQuery: string;
     let supabaseClientForQuery: SupabaseClient;
@@ -53,13 +83,35 @@ serve(async (req: Request) => {
       userIdForQuery = user.id;
     }
 
-    console.log(`Fetching projects for effective user_id: ${userIdForQuery}`);
+    console.log(`Fetching projects for effective user_id: ${userIdForQuery}, orgIdParam: ${orgIdParam}`);
 
-    const { data: projects, error } = await supabaseClientForQuery
+    // Start building the query
+    let query = supabaseClientForQuery
       .from('projects')
-      .select('id, name, description, github_repo_url, created_at, updated_at, user_id, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)')
-      .eq('user_id', userIdForQuery) // Explicitly filter by the determined user_id
-      .order('created_at', { ascending: false });
+      .select('id, name, description, github_repo_url, created_at, updated_at, user_id, leader_user_id, github_org_id, github_org_login, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)')
+      .eq('user_id', userIdForQuery); // Always filter by the user who owns the project record
+
+    // Apply organization filtering based on orgIdParam (which could be string or number now)
+    if (orgIdParam !== null && orgIdParam !== undefined) {
+      if (orgIdParam === 'personal') {
+        console.log("Filtering for personal projects (github_org_id IS NULL)");
+        query = query.is('github_org_id', null);
+      } else {
+        // Attempt to parse if it's not already a number (e.g., from query param)
+        const orgIdNum = typeof orgIdParam === 'number' ? orgIdParam : parseInt(String(orgIdParam), 10);
+        if (!isNaN(orgIdNum)) {
+          console.log(`Filtering for organization ID: ${orgIdNum}`);
+          query = query.eq('github_org_id', orgIdNum);
+        } else {
+          console.warn(`Invalid orgId parameter received: ${orgIdParam}. Ignoring org filter.`);
+        }
+      }
+    } else {
+      console.log("No valid orgId parameter provided, fetching all user's projects.");
+    }
+
+    // Add ordering and execute the query
+    const { data: projects, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
       console.error("Error fetching projects:", error);

@@ -23,8 +23,9 @@ serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
-  if (req.method !== 'GET') {
-    return new Response(JSON.stringify({ error: 'Method not allowed. Only GET is accepted.' }), {
+  // Change to accept POST
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed. Only POST is accepted.' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 405,
     });
   }
@@ -36,12 +37,35 @@ serve(async (req: Request) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
       });
     }
+    
+    // Extract body to get provider_token
+    let requestBody: { provider_token?: string };
+    try {
+      requestBody = await req.json();
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
+      });
+    }
 
-    // Create ONE Supabase client initialized with the user's JWT from the header
+    const githubAccessToken = requestBody.provider_token;
+
+    if (!githubAccessToken) {
+      console.error("provider_token is missing from request body.");
+      return new Response(JSON.stringify({ error: 'GitHub provider_token not found in request body.' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400, // Bad request
+      });
+    }
+
+    // Create Supabase client primarily for auth validation using the user's JWT
     const supabaseUserClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
+      {
+        global: {
+          headers: { Authorization: authHeader },
+        }
+      }
     );
 
     // First, try to get the user object. This validates the JWT.
@@ -53,60 +77,45 @@ serve(async (req: Request) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
       });
     }
-    console.log("User object from getUser():", JSON.stringify(user, null, 2));
+    console.log(`User ${user.id} authenticated via JWT. Using provider_token from request body (length: ${githubAccessToken.length}).`);
 
-    // Now, try to get the session using the same client.
-    // This session object is expected to contain the provider_token.
-    const { data: sessionData, error: sessionError } = await supabaseUserClient.auth.getSession();
-    
-    console.log("Data from getSession():", JSON.stringify(sessionData, null, 2));
-    console.log("Error from getSession():", JSON.stringify(sessionError, null, 2));
+    // Proceed with GitHub API call using the token from the body
+    let githubResponse: Response;
+    let responseBodyText: string = ''; // Declare responseBodyText outside the try block
+    try {
+      console.log("Attempting fetch to https://api.github.com/user/orgs");
+      githubResponse = await fetch('https://api.github.com/user/orgs', {
+        headers: {
+          'Authorization': `token ${githubAccessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      });
+      console.log(`GitHub API response status: ${githubResponse.status}`);
 
-    if (sessionError || !sessionData?.session) {
-      console.error("Error or null session from getSession(). Error:", sessionError, "SessionData:", sessionData);
-      return new Response(JSON.stringify({ error: 'Failed to retrieve full session data (session is null or error occurred).' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500,
+      // Read body once as text, regardless of status, to handle both success and error parsing
+      responseBodyText = await githubResponse.text(); // Assign to the outer scope variable
+      console.log(`GitHub API response body (raw text, first 500 chars): ${responseBodyText.substring(0, 500)}...`);
+
+    } catch (fetchError) {
+      console.error("Error during fetch to GitHub API:", fetchError);
+      return new Response(JSON.stringify({ error: 'Failed to connect to GitHub API.', details: fetchError.message }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 502, // Bad Gateway might be more appropriate
       });
     }
-    
-    const session = sessionData.session;
-    // Double-check user consistency (should match if using the same client and JWT)
-    if (session.user.id !== user.id) {
-      console.error("Session user ID mismatch. getUser ID:", user.id, "getSession ID:", session.user.id);
-      return new Response(JSON.stringify({ error: 'Session user ID mismatch after successful getUser(). This is unexpected.' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500,
-      });
-    }
-
-    const githubAccessToken = session.provider_token;
-
-    if (!githubAccessToken) {
-      console.error("provider_token is missing from session object. Session:", JSON.stringify(session, null, 2));
-      return new Response(JSON.stringify({ error: 'GitHub provider_token not found in session. Ensure OAuth scopes (e.g., read:org) were granted and user re-authenticated if scopes changed.' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
-      });
-    }
-
-    console.log(`Successfully retrieved provider_token. Fetching GitHub organizations for user ${user.id}`);
-
-    // If we got here, provider_token exists. Proceed with GitHub API call.
-    const githubResponse = await fetch('https://api.github.com/user/orgs', {
-      headers: {
-        'Authorization': `token ${githubAccessToken}`,
-        'Accept': 'application/vnd.github.v3+json',
-      },
-    });
 
     if (!githubResponse.ok) {
-      const errorBody = await githubResponse.text();
-      console.error(`GitHub API error: ${githubResponse.status}`, errorBody);
-      // Try to parse errorBody as JSON for more details if possible
-      let ghError = errorBody;
+      // We already read the body text above
+      console.error(`GitHub API request failed with status: ${githubResponse.status}. Body: ${responseBodyText}`);
+
+      // Try to parse errorBody as JSON for more details
+      let ghError: any = responseBodyText; // Default to text
       try {
-        ghError = JSON.parse(errorBody);
-      } catch (e) { /* ignore parsing error */ }
+        ghError = JSON.parse(responseBodyText); // Try parsing
+      } catch (e) { 
+         console.warn("GitHub response body was not valid JSON.");
+      }
       
-      let message = `GitHub API request failed: ${githubResponse.status}.`;
+      let message = `GitHub API request failed with status: ${githubResponse.status}.`;
       if (typeof ghError === 'object' && ghError !== null && (ghError as any).message) {
         message += ` Message: ${(ghError as any).message}`;
       }
@@ -122,10 +131,22 @@ serve(async (req: Request) => {
       });
     }
 
-    const orgs: GitHubOrg[] = await githubResponse.json();
+    // Now try to parse the successful response as JSON
+    let orgs: GitHubOrg[];
+    try {
+      orgs = JSON.parse(responseBodyText); // Parse the text we already read
+    } catch (parseError) {
+      console.error("Error parsing successful GitHub API response:", parseError);
+      console.error("Response body that failed parsing:", responseBodyText);
+      return new Response(JSON.stringify({ error: 'Failed to parse GitHub API response.', details: parseError.message }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500, 
+      });
+    }
+    
+    console.log(`Successfully parsed ${orgs.length} organizations from GitHub response.`);
     
     const simplifiedOrgs = orgs.map(org => ({
-      id: org.id,
+      id: org.id, // Keep original GitHub ID
       login: org.login,
       avatar_url: org.avatar_url,
     }));
