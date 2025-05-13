@@ -82,8 +82,8 @@ serve(async (req: Request) => {
     if (payload.projectName !== undefined) updateData.name = payload.projectName;
     if (payload.githubRepoURL !== undefined) updateData.github_repo_url = payload.githubRepoURL;
     if (payload.description !== undefined) updateData.description = payload.description;
-    if (payload.org !== undefined) updateData.org = payload.org;
-    if (payload.project_leader !== undefined) updateData.project_leader = payload.project_leader;
+    if (payload.org !== undefined) updateData.github_org_login = payload.org === 'Personal' ? null : payload.org; // Changed to github_org_login and handle 'Personal'
+    if (payload.project_leader !== undefined) updateData.leader_user_id = payload.project_leader; // Changed to leader_user_id
 
     // Add updated_at timestamp automatically by Supabase
     updateData.updated_at = new Date().toISOString();

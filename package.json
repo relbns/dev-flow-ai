@@ -12,9 +12,10 @@
     "local-agent:list-files": "npm run local-agent:cli -- list-files ../..",
     "local-agent:list-files-recursive": "npm run local-agent:cli -- list-files ../.. -r",
     "local-agent:write-test-file": "npm run local-agent:cli -- write-file-content ../../test-cli-write.txt \"Hello from CLI test script\"",
-    "local-agent": "npm run local-agent:start-server", 
+    "local-agent": "npm run local-agent:start-server",
     "supabase:start": "echo \"Ensure Supabase CLI is installed. Run: supabase start\"",
-    "supabase:deploy": "echo \"Ensure Supabase CLI is installed. Run: supabase functions deploy --project-ref <YOUR-PROJECT-REF>\""
+    "supabase:deploy": "echo \"Ensure Supabase CLI is installed. Run: supabase functions deploy --project-ref <YOUR-PROJECT-REF>\"",
+    "deploy:edge-functions": "cd supabase && sh ./functions/deploy_all_edge_functions.sh && cd .."
   },
   "workspaces": [
     "apps/*",

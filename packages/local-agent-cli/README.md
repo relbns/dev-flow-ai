@@ -27,11 +27,18 @@ The Local Agent CLI is part of the DevFlow AI monorepo and is typically run from
 ### Configuration (`configure` command)
 
 Run `devflow-local-agent configure` to set up default values for:
-*   API Key (used for both HTTP and Stdio MCP modes)
-*   Default Port (for HTTP server mode)
-*   Default Project Root Path (for HTTP server mode if not specified at startup)
+*   **API Key:** This key is used for authenticating clients *to* this Local Agent (both HTTP and Stdio MCP modes) and also for authenticating this Local Agent *to* the remote Supabase MCP Gateway if you use remote tools.
+*   **Default Port:** The port number the HTTP server will listen on (e.g., `52173`).
+*   **Default Project Root Path:** This is a crucial setting for defining the primary directory for local operations.
+    *   **What it's for:** When the Local Agent performs actions like reading or writing files, this path serves as the top-level directory. All file operations are confined within this root, acting as a security sandbox.
+    *   **"Absolute path":** You should provide the full path from your filesystem's root (e.g., `/Users/yourname/myproject` on macOS/Linux or `C:\Users\yourname\myproject` on Windows).
+    *   **"Leave empty for CWD":** CWD means "Current Working Directory".
+        *   If you leave this field empty during `configure`, the configuration effectively stores an instruction to "use CWD".
+        *   Then, when you later run `devflow-local-agent start-server` (or just `devflow-local-agent`), if no other project root is specified via command-line options or environment variables, the agent will use the directory *from which you are currently running that `devflow-local-agent start-server` command* as its operational project root.
+        *   **In essence:** Leaving it empty during `configure` makes the project root dynamic, determined by where you start the agent's server. Providing an absolute path during `configure` makes it fixed, unless overridden at startup.
+    *   This configured path (or the CWD behavior) is the default for the HTTP server mode if not overridden by command-line options or environment variables at startup. For Stdio MCP mode, the `projectRoot` is typically provided with each tool call.
 
-These values are saved to a local configuration file (`~/.devflow-agent-config.json`).
+These values are saved to a local configuration file (e.g., `~/.config/devflow-local-agent/config.json` on Linux, `~/Library/Application Support/devflow-local-agent/config.json` on macOS).
 
 Configuration can also be provided via environment variables or command-line options, which override saved defaults.
 

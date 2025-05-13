@@ -32,6 +32,7 @@ const INITIAL_CWD = process.cwd();
 let currentApiKey = null; // For authenticating incoming requests TO this agent's HTTP server
 let currentProjectRoot = INITIAL_CWD;
 const DEFAULT_PORT = 52173;
+const DEFAULT_SUPABASE_URL = 'https://xfoxoiurhhqjjhqhoaaf.supabase.co';
 let PORT = DEFAULT_PORT;
 
 // Helper to read package.json for version
@@ -311,15 +312,15 @@ program
       {
         type: 'input', name: 'supabaseUrl',
         message: 'Enter Supabase instance URL (for remote tools, e.g., http://localhost:54321 or https://<ref>.supabase.co):',
-        default: currentConfig.supabaseUrl,
+        default: currentConfig.supabaseUrl || DEFAULT_SUPABASE_URL,
         validate: v => (v && v.startsWith('http')) ? true : 'Please enter a valid URL starting with http:// or https://.'
       },
-      {
-        type: 'password', name: 'devflowApiKeyRemote',
-        message: 'Enter DevFlow API Key (from web UI) for authenticating *to* the Supabase MCP Gateway (for remote tools):',
-        default: currentConfig.devflowApiKeyRemote, mask: '*',
-        validate: v => true // Allow empty
-      },
+      // {
+      //   type: 'password', name: 'devflowApiKeyRemote',
+      //   message: 'Enter DevFlow API Key (from web UI) for authenticating *to* the Supabase MCP Gateway (for remote tools):',
+      //   default: currentConfig.devflowApiKeyRemote, mask: '*',
+      //   validate: v => true // Allow empty
+      // },
     ];
     try {
       const answers = await inquirer.prompt(questions);
@@ -328,12 +329,11 @@ program
         port: parseInt(answers.port, 10),
         root: answers.root.trim() === '' ? undefined : path.resolve(answers.root.trim()),
         supabaseUrl: answers.supabaseUrl.trim(),
-        devflowApiKeyRemote: answers.devflowApiKeyRemote,
+        devflowApiKeyRemote: answers.apiKey, // Use the same API key for remote access
       };
       if (!newConfig.root) delete newConfig.root;
-      if (newConfig.devflowApiKeyRemote === '') { 
-        delete newConfig.devflowApiKeyRemote;
-      } else if (!newConfig.devflowApiKeyRemote) {
+      // Ensure devflowApiKeyRemote is handled correctly if apiKey is empty (though validated)
+      if (!newConfig.devflowApiKeyRemote) {
          delete newConfig.devflowApiKeyRemote;
       }
 
