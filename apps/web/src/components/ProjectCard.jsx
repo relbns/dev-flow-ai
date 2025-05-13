@@ -20,6 +20,7 @@ import { Clock, MoreVertical, Users, Edit, Trash2, AlertCircle, ExternalLink, Ey
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { useToast } from "@/hooks/use-toast"; 
 import { supabase } from '@/lib/supabaseClient'; // Using @ alias
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"; // Import Avatar components
 
 const ProjectCard = ({ project, onProjectDeleted }) => { 
   const { toast } = useToast(); 
@@ -173,15 +174,29 @@ const ProjectCard = ({ project, onProjectDeleted }) => {
       </CardContent>
       <CardFooter className="pt-2 flex items-center justify-between text-sm text-muted-foreground">
         <div className="flex items-center gap-2">
-          {/* Display Leader User ID */}
-          {project.leader_user_id && (
-            <div className="flex items-center gap-1" title={`Leader User ID: ${project.leader_user_id}`}>
-              <User className="h-4 w-4" />
-              <span className="truncate max-w-[100px]">Leader: {project.leader_user_id.substring(0, 8)}...</span> 
+          {/* Display Leader Info */}
+          {project.leader ? (
+            <div className="flex items-center gap-2" title={`Leader: ${project.leader.raw_user_meta_data?.full_name || project.leader.email}`}>
+              <Avatar className="h-5 w-5">
+                <AvatarImage src={project.leader.raw_user_meta_data?.avatar_url} alt={project.leader.raw_user_meta_data?.full_name || project.leader.email} />
+                <AvatarFallback className="text-xs">
+                  {/* Simple fallback initials */}
+                  {(project.leader.raw_user_meta_data?.full_name || project.leader.email || 'U').substring(0, 1).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <span className="truncate max-w-[100px] text-xs">
+                {project.leader.raw_user_meta_data?.full_name || project.leader.email}
+              </span>
             </div>
-          )}
+          ) : project.leader_user_id ? (
+             // Fallback if leader object is missing but ID exists
+             <div className="flex items-center gap-1 text-xs" title={`Leader User ID: ${project.leader_user_id}`}>
+               <User className="h-4 w-4" />
+               <span className="truncate max-w-[100px]">Leader ID: {project.leader_user_id.substring(0, 8)}...</span>
+             </div>
+          ) : null}
           {/* project.members is not in Supabase data yet */}
-          {/* <Users className="h-4 w-4 ml-4" /> 
+          {/* <Users className="h-4 w-4 ml-4" />
           <span>{project.members || 'N/A'} members</span> */}
         </div>
         <div className="flex items-center gap-2">

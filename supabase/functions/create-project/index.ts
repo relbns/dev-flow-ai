@@ -16,6 +16,8 @@ interface ProjectPayload {
   description?: string | null;
   guidelines?: string[];
   scopedPaths?: ScopedPath[];
+  org?: string | null; // Added org field
+  project_leader?: string | null; // Added project_leader field (user_id)
   user_id_from_gateway?: string; // Added for gateway calls
 }
 
@@ -40,6 +42,8 @@ async function insertProjectData(
       name: payload.projectName,
       github_repo_url: payload.githubRepoURL || null,
       description: payload.description || null,
+      org: payload.org || null, // Insert org
+      project_leader: payload.project_leader || null, // Insert project_leader
     })
     .select()
     .single();
@@ -137,7 +141,7 @@ serve(async (req: Request) => {
     // Use the same client that performed the insert (could be admin or user-context)
     const { data: newProjectDetails, error: fetchError } = await supabaseClientForQuery
       .from('projects')
-      .select('id, name, description, github_repo_url, created_at, updated_at, user_id, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)')
+      .select('id, name, description, github_repo_url, created_at, updated_at, user_id, org, project_leader, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)') // Added org and project_leader
       .eq('id', newProjectId)
       .eq('user_id', userIdForQuery) // Ensure we only fetch if it matches the user context
       .single();

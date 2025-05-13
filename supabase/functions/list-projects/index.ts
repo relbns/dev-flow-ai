@@ -85,10 +85,16 @@ serve(async (req: Request) => {
 
     console.log(`Fetching projects for effective user_id: ${userIdForQuery}, orgIdParam: ${orgIdParam}`);
 
-    // Start building the query
+    // Step 1: Build the query to fetch projects, including leader_user_id
+    // We will fetch leader details separately to avoid potential schema cache issues with cross-schema joins.
     let query = supabaseClientForQuery
       .from('projects')
-      .select('id, name, description, github_repo_url, created_at, updated_at, user_id, leader_user_id, github_org_id, github_org_login, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)')
+      .select(`
+        id, name, description, github_repo_url, created_at, updated_at, user_id, github_org_id, github_org_login,
+        leader_user_id, 
+        project_guidelines(id, guideline_text, "order"), 
+        scoped_paths(id, name, path_in_repo, notes)
+      `)
       .eq('user_id', userIdForQuery); // Always filter by the user who owns the project record
 
     // Apply organization filtering based on orgIdParam (which could be string or number now)
@@ -110,17 +116,55 @@ serve(async (req: Request) => {
       console.log("No valid orgId parameter provided, fetching all user's projects.");
     }
 
-    // Add ordering and execute the query
-    const { data: projects, error } = await query.order('created_at', { ascending: false });
+    // Add ordering and execute the initial project query
+    const { data: projectsData, error: projectsError } = await query.order('created_at', { ascending: false });
 
-    if (error) {
-      console.error("Error fetching projects:", error);
-      throw error; // Let the generic error handler below catch it
+    if (projectsError) {
+      console.error("Error fetching projects:", projectsError);
+      throw projectsError; // Let the generic error handler below catch it
     }
 
-    console.log("Projects fetched:", projects?.length || 0);
+    if (!projectsData || projectsData.length === 0) {
+      console.log("No projects found for the user/criteria.");
+      return new Response(JSON.stringify([]), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      });
+    }
 
-    return new Response(JSON.stringify(projects || []), {
+    console.log("Initial projects fetched:", projectsData.length);
+
+    // Step 2: Extract unique leader IDs
+    const leaderIds = [...new Set(projectsData.map(p => p.leader_user_id).filter(id => id))]; // Filter out null/undefined IDs
+
+    let leadersMap = new Map();
+    if (leaderIds.length > 0) {
+      console.log("Fetching details for leader IDs:", leaderIds);
+      // Step 3: Fetch leader details using the admin client (necessary for auth.users)
+      const adminClient = createAdminClient(); // Ensure we use admin client for auth.users access
+      const { data: leadersData, error: leadersError } = await adminClient
+        .from('users') // Query auth.users directly
+        .select('id, email, raw_user_meta_data')
+        .in('id', leaderIds);
+
+      if (leadersError) {
+        console.error("Error fetching leader details:", leadersError);
+        // Don't fail the whole request, just log the error and proceed without leader details
+      } else if (leadersData) {
+        console.log("Leader details fetched:", leadersData.length);
+        leadersData.forEach(leader => leadersMap.set(leader.id, leader));
+      }
+    }
+
+    // Step 4: Combine project data with leader details
+    const projectsWithLeaders = projectsData.map(project => ({
+      ...project,
+      leader: leadersMap.get(project.leader_user_id) || null, // Add leader object, or null if not found/error
+    }));
+
+    console.log("Returning projects combined with leader data.");
+
+    return new Response(JSON.stringify(projectsWithLeaders || []), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });

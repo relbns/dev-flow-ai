@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom'; // Import useSearchParams
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'; // Added useMemo
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import TaskCard from '@/components/TaskCard';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -7,9 +7,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'; // Added SelectGroup, SelectLabel
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"; // For searchable selects
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"; // For searchable selects
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge'; 
+import { Badge } from '@/components/ui/badge';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -48,6 +50,8 @@ import {
   Briefcase,
   Trash,
   FileDown,
+  ChevronsUpDown, // Added for searchable select
+  Check, // Added for searchable select
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -75,7 +79,17 @@ const Project = () => {
   const [openStakeholder, setOpenStakeholder] = useState(false);
   const [openLink, setOpenLink] = useState(false);
   const [openProjectEdit, setOpenProjectEdit] = useState(false);
-  
+  const [availableLeaders, setAvailableLeaders] = useState([]); // State for leaders dropdown
+  const [loadingLeaders, setLoadingLeaders] = useState(false); // Loading state for leaders
+  const [leaderSearchTerm, setLeaderSearchTerm] = useState(""); // For searchable leader select
+  const [leaderSelectOpen, setLeaderSelectOpen] = useState(false); // For searchable leader select popover
+
+  // States for GitHub repos in edit form
+  const [githubOrgRepos, setGithubOrgRepos] = useState([]);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [repoSearchTerm, setRepoSearchTerm] = useState("");
+  const [repoSelectOpen, setRepoSelectOpen] = useState(false);
+
   const initialTaskFormState = { title: '', description: '', status: 'Backlog', scoped_path_id: '' };
   const [newTaskForm, setNewTaskForm] = useState(initialTaskFormState);
 
@@ -83,12 +97,54 @@ const Project = () => {
   const [linkForm, setLinkForm] = useState({ title: '', url: '', id: '' });
   const [isEditingLink, setIsEditingLink] = useState(false);
   const [isEditingStakeholder, setIsEditingStakeholder] = useState(false);
-  const [isEditingMember, setIsEditingMember] = useState(false); 
+  const [isEditingMember, setIsEditingMember] = useState(false);
   const [memberForm, setMemberForm] = useState({ name: '', role: 'Developer', avatar: '', id: '' });
   const [openMemberDialog, setOpenMemberDialog] = useState(false);
-  const [projectForm, setProjectForm] = useState({});
+  const [projectForm, setProjectForm] = useState({}); // Holds data for the edit form
+  const [initialProjectForm, setInitialProjectForm] = useState({}); // Store initial state for comparison
   const [openDeleteProject, setOpenDeleteProject] = useState(false);
-  
+
+  // Fetch GitHub repos for the project's organization
+  const fetchOrgRepos = useCallback(async (orgName) => {
+    if (!orgName || orgName === 'Personal') {
+      setGithubOrgRepos([]);
+      setLoadingRepos(false); // Ensure loading is set to false
+      return;
+    }
+    setLoadingRepos(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("User not authenticated or access token missing.");
+      }
+
+      const functionUrl = `${supabase.functions.getFunctionsUrl()}/list-github-org-projects?orgName=${encodeURIComponent(orgName)}`;
+      
+      const response = await fetch(functionUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: `Failed to fetch repos: ${response.statusText}` }));
+        throw new Error(errorData.error || `Failed to fetch repos: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      setGithubOrgRepos(data || []);
+
+    } catch (error) {
+      console.error('Error fetching GitHub org repos for project edit:', error);
+      toast({ title: "Error Fetching Org Repos", description: error.message, variant: "destructive" });
+      setGithubOrgRepos([]);
+    } finally {
+      setLoadingRepos(false);
+    }
+  }, [toast]); // supabase is stable, toast is the main dependency here
+
   const [projectTasks, setProjectTasks] = useState({
     notStarted: [],
     inProgress: [],
@@ -188,19 +244,102 @@ const Project = () => {
   
    useEffect(() => {
     if (openProjectEdit && project) {
-      setProjectForm({
+      const formData = {
         name: project.name || '',
-        subtitle: project.subtitle || '',
+        // subtitle: project.subtitle || '', // Not a direct DB field, handle separately if needed for display
         description: project.description || '',
         repository: project.github_repo_url || '',
-        designUrl: project.designUrl || '', 
-        projectLead: project.members?.find(m => m.role === 'Project Lead')?.id || '',
-        client: project.client || '', 
-        dueDate: project.dueDate || '', 
-        status: project.status || 'active'
-      });
+        org: project.org || 'Personal',
+        project_leader: project.project_leader || '',
+        status: project.status || 'active',
+        // Fields like designUrl, client, dueDate are not in the DB schema for 'projects'
+        // but were in the original form state. We should only include fields that are
+        // actually part of the project data model being edited.
+        // For now, I'll keep them out of the initial population from `project` data
+        // unless they are confirmed to be part of the `projects` table schema.
+        // designUrl: project.designUrl || '', (example if it were in DB)
+      };
+      setProjectForm(formData);
+      setInitialProjectForm(formData); // Store initial state based on loaded project
+      fetchUsers(); // Fetch users for the dropdown
+      if (project.org && project.org !== 'Personal') {
+        fetchOrgRepos(project.org);
+      } else {
+        setGithubOrgRepos([]); // Clear if no org or personal
+        setLoadingRepos(false);
+      }
     }
-  }, [openProjectEdit, project]);
+  }, [openProjectEdit, project, fetchUsers, fetchOrgRepos]); // Added fetchOrgRepos
+
+  // Fetch available leaders based on project context (org)
+  const fetchUsers = useCallback(async () => {
+    setLoadingLeaders(true);
+    setAvailableLeaders([]); // Clear previous leaders
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const localCurrentUserId = session?.user?.id;
+
+    try {
+      if (project?.org && project.org !== 'Personal') {
+        // Fetch GitHub org members for the project's organization
+        const { data: orgMembers, error: orgMembersError } = await supabase.functions.invoke(
+          'list-github-org-members',
+          { method: 'POST', body: { orgName: project.org } } // Assuming function accepts POST
+        );
+
+        if (orgMembersError) {
+          console.error(`Error fetching GitHub org members for ${project.org}:`, orgMembersError);
+          toast({ title: "Error Fetching Org Members", description: orgMembersError.message, variant: "destructive" });
+          if (localCurrentUserId) { // Fallback to current user
+            const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+            setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+          }
+          return;
+        }
+        
+        const githubLogins = orgMembers?.map(member => member.login).filter(login => login) || [];
+
+        if (githubLogins.length > 0) {
+          const { data: supabaseUsers, error: mapError } = await supabase.functions.invoke(
+            'get-supabase-users-by-github-logins',
+            { method: 'POST', body: { github_logins: githubLogins } }
+          );
+
+          if (mapError) {
+            console.error("Error mapping GitHub logins to Supabase users:", mapError);
+            toast({ title: "Error Mapping Users", description: mapError.message, variant: "destructive" });
+            if (localCurrentUserId) { // Fallback
+              const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+              setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+            }
+            return;
+          }
+          setAvailableLeaders(supabaseUsers || []);
+        } else {
+           console.warn(`No GitHub logins found for org members of ${project.org}.`);
+           if (localCurrentUserId) {
+             const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+             setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+           }
+        }
+
+      } else { // Personal project or org is not set
+        if (localCurrentUserId) {
+          const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+          setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching users for project edit:', error);
+      toast({ title: "Error Fetching Users", description: error.message, variant: "destructive" });
+      if (localCurrentUserId) { // Fallback
+        const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+        setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+      }
+    } finally {
+      setLoadingLeaders(false);
+    }
+  }, [toast, project, supabase]); // Added project and supabase to dependencies
   
   const handleDragEnd = (result) => {
     const { source, destination, draggableId } = result;
@@ -292,9 +431,64 @@ const Project = () => {
   const handleEditLink = (link) => { toast({title: "Not Implemented"}); };
   const copyToClipboard = (text, msg) => { navigator.clipboard.writeText(text); toast({title: msg || "Copied!"}); };
   const handleEditMember = (member) => { toast({title: "Not Implemented"}); };
-  const handleRemoveMember = (id) => { toast({title: "Not Implemented"}); };
-  const handleAddMember = (e) => { e.preventDefault(); toast({title: "Not Implemented"}); };
-  const handleEditProject = (e) => { e.preventDefault(); toast({title: "Not Implemented"}); };
+  const handleRemoveMember = (id) => { toast({ title: "Not Implemented" }); };
+  const handleAddMember = (e) => { e.preventDefault(); toast({ title: "Not Implemented" }); };
+
+  // Handle saving project edits
+  const handleEditProject = async (e) => {
+    e.preventDefault();
+    if (!project || !project.id) {
+      toast({ title: "Error", description: "Project context is missing.", variant: "destructive" });
+      return;
+    }
+
+    // Construct payload with only changed fields (removed TS type annotation)
+    const payload = { projectId: project.id };
+    let hasChanges = false;
+
+    // Compare current form state with initial state
+    if (projectForm.name !== initialProjectForm.name) { payload.projectName = projectForm.name; hasChanges = true; }
+    if (projectForm.description !== initialProjectForm.description) { payload.description = projectForm.description; hasChanges = true; }
+    if (projectForm.repository !== initialProjectForm.repository) { payload.githubRepoURL = projectForm.repository; hasChanges = true; }
+    // Org is not editable here, so no need to check/send
+    if (projectForm.project_leader !== initialProjectForm.project_leader) { payload.project_leader = projectForm.project_leader; hasChanges = true; }
+    // Add other editable fields here if needed (e.g., status)
+    // if (projectForm.status !== initialProjectForm.status) { payload.status = projectForm.status; hasChanges = true; }
+
+    if (!hasChanges) {
+      toast({ title: "No Changes", description: "No changes were detected to save." });
+      setOpenProjectEdit(false);
+      return;
+    }
+
+    console.log("Submitting project update payload:", payload);
+
+    try {
+      setLoading(true); // Indicate loading state
+      const { data: updatedProject, error } = await supabase.functions.invoke('update-project', {
+        method: 'PATCH',
+        body: payload,
+      });
+
+      if (error) throw error;
+
+      console.log("Project updated successfully:", updatedProject);
+      toast({ title: "Project Updated", description: `Project "${updatedProject.name}" has been updated.` });
+      setOpenProjectEdit(false);
+      fetchProjectDetails(); // Refresh project details to show changes
+
+    } catch (error) {
+      console.error('Error updating project:', error);
+      toast({
+        title: "Error Updating Project",
+        description: error.message || "An unexpected error occurred.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   const handleDeleteProject = async () => {
     if (!project || !project.id) {
@@ -515,9 +709,44 @@ const Project = () => {
             <div className="space-y-2"><Label htmlFor="taskStatus">Status</Label><Select defaultValue="Backlog" value={newTaskForm.status} onValueChange={(value) => setNewTaskForm(prev => ({ ...prev, status: value }))}><SelectTrigger id="taskStatus"><SelectValue placeholder="Select status" /></SelectTrigger><SelectContent><SelectItem value="Backlog">Backlog</SelectItem><SelectItem value="To Do">To Do</SelectItem><SelectItem value="In Progress">In Progress</SelectItem></SelectContent></Select></div>
             <div className="flex justify-end gap-2 pt-4"><Button type="button" variant="outline" onClick={() => setOpenNewTask(false)}>Cancel</Button><Button type="submit">Create Task</Button></div></form></DialogContent></Dialog>
       <Dialog open={openProjectEdit} onOpenChange={setOpenProjectEdit}><DialogContent className="sm:max-w-[525px]"><DialogHeader><DialogTitle>Edit Project</DialogTitle></DialogHeader><form onSubmit={handleEditProject} className="space-y-4 pt-4"><div className="space-y-2"><Label htmlFor="projectName">Project Name *</Label><Input id="projectName" value={projectForm.name || ''} onChange={(e) => setProjectForm(prev => ({ ...prev, name: e.target.value }))} placeholder="Enter project name" required /></div><div className="space-y-2"><Label htmlFor="projectSubtitle">Subtitle</Label><Input id="projectSubtitle" value={projectForm.subtitle || ''} onChange={(e) => setProjectForm(prev => ({ ...prev, subtitle: e.target.value }))} placeholder="Enter project subtitle" /></div><div className="space-y-2"><Label htmlFor="projectDescription">Description</Label><Textarea id="projectDescription" value={projectForm.description || ''} onChange={(e) => setProjectForm(prev => ({ ...prev, description: e.target.value }))} placeholder="Enter project description" className="min-h-24" /></div><div className="space-y-2"><Label htmlFor="repository">GitHub Repository URL</Label><Input id="repository" value={projectForm.repository || ''} onChange={(e) => setProjectForm(prev => ({ ...prev, repository: e.target.value }))} placeholder="Enter GitHub repository URL" /></div><div className="space-y-2"><Label htmlFor="designUrl">Design Files URL</Label><Input id="designUrl" value={projectForm.designUrl || ''} onChange={(e) => setProjectForm(prev => ({ ...prev, designUrl: e.target.value }))} placeholder="Enter design files URL" /></div><div className="space-y-2"><Label htmlFor="client">Client (Optional)</Label><Input id="client" value={projectForm.client || ''} onChange={(e) => setProjectForm(prev => ({ ...prev, client: e.target.value }))} placeholder="Enter client name" /></div><div className="space-y-2"><Label htmlFor="dueDate">Due Date (Optional)</Label><Input id="dueDate" type="date" value={projectForm.dueDate || ''} onChange={(e) => setProjectForm(prev => ({ ...prev, dueDate: e.target.value }))} /></div>
-            <div className="space-y-2"><Label htmlFor="projectLead">Project Lead</Label><Select value={projectForm.projectLead || ''} onValueChange={(value) => setProjectForm(prev => ({ ...prev, projectLead: value }))}><SelectTrigger id="projectLead"><SelectValue placeholder="Select project lead" /></SelectTrigger><SelectContent>{project?.members?.map(member => (<SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>))}</SelectContent></Select></div>
+            {/* Org Display (Non-editable) */}
+            <div className="space-y-2">
+              <Label htmlFor="projectOrgEdit">Organization</Label>
+              <Input id="projectOrgEdit" value={projectForm.org || 'Personal'} disabled className="bg-muted/50" />
+            </div>
+            {/* Project Lead (Searchable Select) */}
+            <div className="space-y-2">
+              <Label htmlFor="projectLeaderEdit">Project Lead</Label>
+              <Popover open={leaderSelectOpen} onOpenChange={setLeaderSelectOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" role="combobox" aria-expanded={leaderSelectOpen} className="w-full justify-between font-normal" disabled={loadingLeaders}>
+                    {projectForm.project_leader ? availableLeaders.find((leader) => leader.id === projectForm.project_leader)?.display_name : "Select leader..."}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                  <Command>
+                    <CommandInput placeholder="Search leaders..." value={leaderSearchTerm} onValueChange={setLeaderSearchTerm} />
+                    <CommandList>
+                      <CommandEmpty>{loadingLeaders ? "Loading..." : "No leaders found."}</CommandEmpty>
+                      <CommandGroup>
+                        {availableLeaders.filter(leader => leader.display_name.toLowerCase().includes(leaderSearchTerm.toLowerCase())).map((leader) => (
+                          <CommandItem key={leader.id} value={leader.id} onSelect={(currentValue) => { setProjectForm(prev => ({ ...prev, project_leader: currentValue === projectForm.project_leader ? "" : currentValue })); setLeaderSelectOpen(false); setLeaderSearchTerm(""); }}>
+                            <Check className={`mr-2 h-4 w-4 ${projectForm.project_leader === leader.id ? "opacity-100" : "opacity-0"}`} />
+                            {leader.display_name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              {loadingLeaders && <p className="text-xs text-muted-foreground">Loading leaders...</p>}
+            </div>
+            {/* Status Select (Keep existing) */}
             <div className="space-y-2"><Label htmlFor="projectStatus">Status</Label><Select value={projectForm.status || 'active'} onValueChange={(value) => setProjectForm(prev => ({ ...prev, status: value }))}><SelectTrigger id="projectStatus"><SelectValue placeholder="Select status" /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="archived">Archived</SelectItem></SelectContent></Select></div>
-            <div className="flex justify-end gap-2 pt-4"><Button type="button" variant="outline" onClick={() => setOpenProjectEdit(false)}>Cancel</Button><Button type="submit">Save Changes</Button></div></form></DialogContent></Dialog>
+            <div className="flex justify-end gap-2 pt-4"><Button type="button" variant="outline" onClick={() => setOpenProjectEdit(false)}>Cancel</Button><Button type="submit" disabled={loading}>Save Changes</Button></div></form></DialogContent></Dialog>
+      {/* Other Dialogs (Member, Stakeholder, Link) remain unchanged */}
       <Dialog open={openMemberDialog} onOpenChange={setOpenMemberDialog}><DialogContent className="sm:max-w-[425px]"><DialogHeader><DialogTitle>{isEditingMember ? 'Edit Team Member' : 'Add Team Member'}</DialogTitle></DialogHeader><form onSubmit={handleAddMember} className="space-y-4 pt-4"><div className="space-y-2"><Label htmlFor="memberName">Name *</Label><Input id="memberName" value={memberForm.name} onChange={(e) => setMemberForm(prev => ({ ...prev, name: e.target.value }))} placeholder="Enter name" required /></div><div className="space-y-2"><Label htmlFor="memberRole">Role</Label><Select value={memberForm.role || 'Developer'} onValueChange={(value) => setMemberForm(prev => ({ ...prev, role: value }))}><SelectTrigger id="memberRole"><SelectValue placeholder="Select role" /></SelectTrigger><SelectContent><SelectItem value="Project Lead">Project Lead</SelectItem><SelectItem value="Developer">Developer</SelectItem><SelectItem value="Designer">Designer</SelectItem><SelectItem value="QA">QA</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label htmlFor="memberAvatar">Avatar URL (Optional)</Label><Input id="memberAvatar" value={memberForm.avatar || ''} onChange={(e) => setMemberForm(prev => ({ ...prev, avatar: e.target.value }))} placeholder="Enter avatar URL" /></div><div className="flex justify-end gap-2 pt-4"><Button type="button" variant="outline" onClick={() => { setOpenMemberDialog(false); setIsEditingMember(false); setMemberForm({ name: '', role: 'Developer', avatar: '' }); }}>Cancel</Button><Button type="submit">{isEditingMember ? 'Update' : 'Add'} Member</Button></div></form></DialogContent></Dialog>
       <Dialog open={openStakeholder} onOpenChange={setOpenStakeholder}><DialogContent className="sm:max-w-[425px]"><DialogHeader><DialogTitle>{isEditingStakeholder ? 'Edit Stakeholder' : 'Add Stakeholder'}</DialogTitle></DialogHeader><form onSubmit={handleAddStakeholder} className="space-y-4 pt-4"><div className="space-y-2"><Label htmlFor="name">Name *</Label><Input id="name" value={stakeholderForm.name} onChange={(e) => setStakeholderForm(prev => ({ ...prev, name: e.target.value }))} placeholder="Enter name" required /></div><div className="space-y-2"><Label htmlFor="email">Email</Label><Input id="email" type="email" value={stakeholderForm.email} onChange={(e) => setStakeholderForm(prev => ({ ...prev, email: e.target.value }))} placeholder="Enter email" /></div><div className="space-y-2"><Label htmlFor="phone">Phone</Label><Input id="phone" value={stakeholderForm.phone} onChange={(e) => setStakeholderForm(prev => ({ ...prev, phone: e.target.value }))} placeholder="Enter phone number" /></div><div className="flex justify-end gap-2 pt-4"><Button type="button" variant="outline" onClick={() => { setOpenStakeholder(false); setIsEditingStakeholder(false); setStakeholderForm({ name: '', email: '', phone: '' }); }}>Cancel</Button><Button type="submit">{isEditingStakeholder ? 'Update' : 'Add'} Stakeholder</Button></div></form></DialogContent></Dialog>
       <Dialog open={openLink} onOpenChange={setOpenLink}><DialogContent className="sm:max-w-[425px]"><DialogHeader><DialogTitle>{isEditingLink ? 'Edit Link' : 'Add Link'}</DialogTitle></DialogHeader><form onSubmit={handleAddLink} className="space-y-4 pt-4"><div className="space-y-2"><Label htmlFor="title">Title</Label><Input id="title" value={linkForm.title} onChange={(e) => setLinkForm(prev => ({ ...prev, title: e.target.value }))} placeholder="Enter title" required /></div><div className="space-y-2"><Label htmlFor="url">URL</Label><Input id="url" value={linkForm.url} onChange={(e) => setLinkForm(prev => ({ ...prev, url: e.target.value }))} placeholder="Enter URL" required /></div><div className="flex justify-end gap-2 pt-4"><Button type="button" variant="outline" onClick={() => { setOpenLink(false); setIsEditingLink(false); setLinkForm({ title: '', url: '', id: '' }); }}>Cancel</Button><Button type="submit">{isEditingLink ? 'Update' : 'Add'} Link</Button></div></form></DialogContent></Dialog>

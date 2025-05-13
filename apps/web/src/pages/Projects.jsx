@@ -1,16 +1,18 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom'; // Import useOutletContext
+import React, { useState, useEffect, useCallback, useMemo } from 'react'; // Added useMemo
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'; // Added SelectGroup, SelectLabel
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"; // For searchable selects
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"; // For searchable selects
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import ProjectCard from '@/components/ProjectCard';
-import { Skeleton } from "@/components/ui/skeleton"; 
-import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card"; 
-import { Plus, Search, Github, User, Trash2 } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient'; // Using @ alias
+import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card";
+import { Plus, Search, Github, User, Trash2, Building, ChevronsUpDown, Check } from 'lucide-react'; // Added Building, ChevronsUpDown, Check
+import { supabase } from '@/lib/supabaseClient';
 import { useToast } from "@/hooks/use-toast";
 
 const Projects = () => {
@@ -23,20 +25,29 @@ const Projects = () => {
   const [filterStatus, setFilterStatus] = useState('all'); // This filter is for project.status, not orgs
   const [projects, setProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [availableLeaders, setAvailableLeaders] = useState([]); // [{ id: uuid, display_name: string }]
+  const [loadingLeaders, setLoadingLeaders] = useState(false);
+  const [githubOrgRepos, setGithubOrgRepos] = useState([]); // [{ id: number, name: string, full_name: string, html_url: string }]
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [repoSearchTerm, setRepoSearchTerm] = useState(""); // For searchable repo select
+  const [leaderSearchTerm, setLeaderSearchTerm] = useState(""); // For searchable leader select
+  const [repoSelectOpen, setRepoSelectOpen] = useState(false); // For searchable repo select popover
+  const [leaderSelectOpen, setLeaderSelectOpen] = useState(false); // For searchable leader select popover
+
 
   const initialScopedPath = { name: '', path_in_repo: '', notes: '' };
-  const [newProjectForm, setNewProjectForm] = useState({
+  const initialNewProjectForm = useMemo(() => ({ // Use useMemo to depend on currentUserId and selectedOrganization
     name: '',
-    subtitle: '',
     description: '',
-    repository: '',
-    designUrl: '', // Not in DB
-    client: '', // Not in DB
-    dueDate: '', // Not in DB
-    projectLeader: '', // Not in DB
+    repository: '', // Store selected repo URL here
+    org: contextType === 'organization' && selectedOrganization ? selectedOrganization.login : 'Personal', // Set initial org based on context
+    projectLeader: currentUserId || '', // Default to current user ID
     projectGuidelines: '',
-    scopedPaths: [initialScopedPath], // Initialize with one empty scoped path
-  });
+    scopedPaths: [initialScopedPath],
+  }), [currentUserId, contextType, selectedOrganization]); // Dependencies for initial form state
+
+  const [newProjectForm, setNewProjectForm] = useState(initialNewProjectForm);
 
   const handleScopedPathChange = (index, field, value) => {
     const updatedPaths = [...newProjectForm.scopedPaths];
@@ -61,99 +72,248 @@ const Projects = () => {
   };
 
   const resetForm = () => {
-    setNewProjectForm({
-      name: '',
-      subtitle: '',
-      description: '',
-      repository: '',
-      designUrl: '',
-      client: '',
-      dueDate: '',
-      projectLeader: '',
-      projectGuidelines: '',
-      scopedPaths: [{ ...initialScopedPath }],
-    });
+      // Reset to initial state derived from context and user ID
+      setNewProjectForm(initialNewProjectForm);
+      setRepoSearchTerm("");
+      setLeaderSearchTerm("");
   };
+
+  // Fetch current user ID on mount
+  useEffect(() => {
+    const fetchUserId = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setCurrentUserId(session.user.id);
+        // Update form's default leader only if it hasn't been changed by the user yet
+        setNewProjectForm(prev => ({
+          ...prev,
+          projectLeader: prev.projectLeader || session.user.id // Set default if empty
+        }));
+      }
+    };
+    fetchUserId();
+  }, []);
+
+  // Fetch available leaders based on context and optionally a specific repository
+  const fetchUsers = useCallback(async (repoFullName = null) => { // Added repoFullName parameter
+    setLoadingLeaders(true);
+    setAvailableLeaders([]); // Clear previous leaders
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const localCurrentUserId = session?.user?.id;
+
+    try {
+      if (contextType === 'organization' && selectedOrganization?.login) {
+        // Fetch GitHub org members using GET via fetch
+        const orgMembersFunctionUrl = `${supabase.functions.getFunctionsUrl()}/list-github-org-members?orgName=${encodeURIComponent(selectedOrganization.login)}`;
+        const orgMembersResponse = await fetch(orgMembersFunctionUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`, // session is defined above
+            'Content-Type': 'application/json'
+          },
+        });
+
+        if (!orgMembersResponse.ok) {
+          const errorData = await orgMembersResponse.json().catch(() => ({ error: `Failed to fetch org members: ${orgMembersResponse.statusText}` }));
+          throw new Error(errorData.error || `Failed to fetch org members: ${orgMembersResponse.statusText}`);
+        }
+        const orgMembers = await orgMembersResponse.json();
+
+        // if (orgMembersError) { // This block is effectively replaced by the fetch error handling above
+        //   console.error("Error fetching GitHub org members:", orgMembersError);
+        // toast({ title: "Error Fetching Org Members", description: orgMembersError.message, variant: "destructive" }); 
+          // Fallback: set current user as only leader if org members fail
+          // This fallback logic is now part of the catch block or the main error handling for orgMembersResponse.ok
+          // if (localCurrentUserId) {
+          //   const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+          //   setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+        // Extra brace and orgMembers re-declaration removed.
+        
+        let combinedGithubLogins = new Set();
+
+        // Get org members' logins
+        const orgMemberLogins = orgMembers?.map(member => member.login).filter(login => login) || [];
+        orgMemberLogins.forEach(login => combinedGithubLogins.add(login));
+
+        // If a repo is specified, also get its collaborators
+        if (repoFullName) {
+          try {
+            const collaboratorsFunctionUrl = `${supabase.functions.getFunctionsUrl()}/list-github-repo-collaborators?repoFullName=${encodeURIComponent(repoFullName)}`;
+            const collaboratorsResponse = await fetch(collaboratorsFunctionUrl, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`,
+                'Content-Type': 'application/json'
+              },
+            });
+            if (collaboratorsResponse.ok) {
+              const collaborators = await collaboratorsResponse.json();
+              const collaboratorLogins = collaborators?.map(collab => collab.login).filter(login => login) || [];
+              collaboratorLogins.forEach(login => combinedGithubLogins.add(login));
+            } else {
+              const errorData = await collaboratorsResponse.json().catch(() => ({ error: `Failed to fetch repo collaborators: ${collaboratorsResponse.statusText}` }));
+              console.warn(`Could not fetch collaborators for ${repoFullName}: ${errorData.error || collaboratorsResponse.statusText}`);
+              // Non-fatal, proceed with org members
+            }
+          } catch (collabError) {
+            console.warn(`Error fetching collaborators for ${repoFullName}:`, collabError);
+            // Non-fatal
+          }
+        }
+        
+        const finalGithubLogins = Array.from(combinedGithubLogins);
+
+        if (finalGithubLogins.length > 0) {
+          const { data: supabaseUsers, error: mapError } = await supabase.functions.invoke(
+            'get-supabase-users-by-github-logins',
+            { method: 'POST', body: { github_logins: finalGithubLogins } }
+          );
+
+          if (mapError) {
+            console.error("Error mapping GitHub logins to Supabase users:", mapError);
+            toast({ title: "Error Mapping Users", description: mapError.message, variant: "destructive" });
+            if (localCurrentUserId) {
+              const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+              setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+            }
+          } else {
+            setAvailableLeaders(supabaseUsers || []);
+            if ((!supabaseUsers || supabaseUsers.length === 0) && localCurrentUserId) {
+              console.warn("No Supabase users found for combined logins. Setting current user as default leader.");
+              const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+              setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+            }
+          }
+        } else {
+           // No GitHub members or collaborators found
+           console.warn("No GitHub logins found from org members or collaborators. Setting current user as default leader.");
+           if (localCurrentUserId) {
+             const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+             setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+           }
+        }
+
+      } else { // Personal context or no org selected
+        if (localCurrentUserId) {
+          const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+          setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching users for project creation:', error);
+      toast({ title: "Error Fetching Users", description: error.message, variant: "destructive" });
+       if (localCurrentUserId) { // Fallback to current user on any error
+         const { data: currentUserProfile } = await supabase.from('profiles').select('id, full_name, username').eq('id', localCurrentUserId).single();
+         setAvailableLeaders([{ id: localCurrentUserId, display_name: currentUserProfile?.full_name || currentUserProfile?.username || session?.user?.email || 'Current User' }]);
+       }
+    } finally {
+      setLoadingLeaders(false);
+    }
+  }, [toast, contextType, selectedOrganization, supabase]); // Added supabase to dependencies
+
+  // Fetch GitHub repos for the selected org
+  const fetchOrgRepos = useCallback(async (orgName) => {
+    if (!orgName || orgName === 'Personal') {
+      setGithubOrgRepos([]);
+      return;
+    }
+    setLoadingRepos(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("User not authenticated or access token missing.");
+      }
+
+      const functionUrl = `${supabase.functions.getFunctionsUrl()}/list-github-org-projects?orgName=${encodeURIComponent(orgName)}`;
+      
+      const response = await fetch(functionUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: `Failed to fetch repos: ${response.statusText}` }));
+        throw new Error(errorData.error || `Failed to fetch repos: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      setGithubOrgRepos(data || []);
+
+    } catch (error) {
+      console.error('Error fetching GitHub repos:', error);
+      toast({ title: "Error Fetching GitHub Repos", description: error.message, variant: "destructive" });
+      setGithubOrgRepos([]);
+    } finally {
+      setLoadingRepos(false);
+    }
+  }, [toast]); // Removed supabase dependency as it's stable
+
+  // Effect to fetch data when dialog opens
+  useEffect(() => {
+    if (openNewProjectDialog) {
+      // Reset form state based on current context when dialog opens
+      setNewProjectForm(initialNewProjectForm);
+      fetchUsers();
+      if (contextType === 'organization' && selectedOrganization) {
+        fetchOrgRepos(selectedOrganization.login);
+      } else {
+        setGithubOrgRepos([]); // Clear repos if personal context
+      }
+    }
+  }, [openNewProjectDialog, fetchUsers, fetchOrgRepos, contextType, selectedOrganization, initialNewProjectForm]);
+
 
   const handleNewProjectSubmit = async (e) => {
     e.preventDefault();
-    
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-    if (sessionError || !session?.user) {
-      toast({
-        title: "Authentication Error",
-        description: "You must be logged in to create a project.",
-        variant: "destructive",
-      });
-      return;
+    // Use currentUserId state instead of fetching session again
+    if (!currentUserId) {
+        toast({ title: "Authentication Error", description: "Could not verify user.", variant: "destructive" });
+        return;
     }
-    const userId = session.user.id;
+
+    // Prepare payload for the create-project function
+    const payload = {
+      projectName: newProjectForm.name,
+      description: newProjectForm.description || null,
+      githubRepoURL: newProjectForm.repository || null,
+      org: newProjectForm.org === 'Personal' ? null : newProjectForm.org, // Send org name or null
+      project_leader: newProjectForm.projectLeader || null, // Send selected leader ID
+      guidelines: newProjectForm.projectGuidelines.trim() ? [newProjectForm.projectGuidelines] : [], // Send guidelines as array
+      scopedPaths: newProjectForm.scopedPaths.filter( // Filter empty paths before sending
+        sp => (sp.name && sp.name.trim() !== '') || (sp.path_in_repo && sp.path_in_repo.trim() !== '') || (sp.notes && sp.notes.trim() !== '')
+      ).map(sp => ({ // Ensure nulls are sent correctly if needed by function
+         name: sp.name?.trim() || null,
+         path_in_repo: sp.path_in_repo?.trim() || null,
+         notes: sp.notes?.trim() || null
+      })),
+      // user_id_from_gateway is not needed here as we call directly with user's token
+    };
+
+    console.log("Submitting new project payload:", payload);
 
     try {
-      setLoadingProjects(true);
-      // 1. Insert into 'projects' table
-      const projectInsertData = {
-        user_id: userId,
-        name: newProjectForm.name,
-        github_repo_url: newProjectForm.repository,
-        description: newProjectForm.description,
-      };
+      setLoadingProjects(true); // Reuse loading state for submission indication
 
-      if (contextType === 'organization' && selectedOrganization) {
-        projectInsertData.github_org_id = selectedOrganization.id;
-        projectInsertData.github_org_login = selectedOrganization.login;
-      } else {
-        projectInsertData.github_org_id = null;
-        projectInsertData.github_org_login = null;
-      }
+      const { data: newProjectDetails, error } = await supabase.functions.invoke('create-project', {
+        method: 'POST',
+        body: payload,
+      });
 
-      const { data: projectData, error: projectError } = await supabase
-        .from('projects')
-        .insert(projectInsertData)
-        .select()
-        .single();
+      if (error) throw error;
 
-      if (projectError) throw projectError;
-      const newProjectId = projectData.id;
-
-      // 2. Insert into 'project_guidelines' table
-      if (newProjectForm.projectGuidelines.trim() !== "") {
-        const { error: guidelineError } = await supabase
-          .from('project_guidelines')
-          .insert({
-            project_id: newProjectId,
-            guideline_text: newProjectForm.projectGuidelines,
-            order: 1
-          });
-        if (guidelineError) console.error("Error saving project guidelines:", guidelineError); // Log but don't fail
-      }
-
-      // 3. Insert into 'scoped_paths' table
-      const validScopedPaths = newProjectForm.scopedPaths.filter(
-        sp => sp.name.trim() !== '' || sp.path_in_repo.trim() !== '' || (sp.notes && sp.notes.trim() !== '')
-      );
-
-      if (validScopedPaths.length > 0) {
-        const scopedPathsToInsert = validScopedPaths.map(sp => ({
-          project_id: newProjectId,
-          name: sp.name.trim() === '' ? null : sp.name.trim(), // Save null if name is empty
-          path_in_repo: sp.path_in_repo.trim() === '' ? null : sp.path_in_repo.trim(),
-          notes: sp.notes.trim() === '' ? null : sp.notes.trim(), // Save null if notes are empty
-        }));
-        const { error: scopedPathsError } = await supabase
-          .from('scoped_paths')
-          .insert(scopedPathsToInsert);
-        if (scopedPathsError) console.error("Error saving scoped paths:", scopedPathsError); // Log but don't fail
-      }
-      
+      console.log("Project created successfully:", newProjectDetails);
       toast({ title: "Project Created", description: `${newProjectForm.name} has been successfully created.` });
       setOpenNewProjectDialog(false);
       resetForm();
-      fetchProjects();
+      fetchProjects(); // Refresh the project list
 
     } catch (error) {
-      console.error('Error creating new project:', error);
+      console.error('Error creating new project via function:', error);
       toast({
         title: "Error Creating Project",
         description: error.message || "An unexpected error occurred.",
@@ -339,6 +499,160 @@ const Projects = () => {
                   />
                 </div>
 
+                {/* Organization Field - Display Only */}
+                <div className="space-y-2">
+                  <Label htmlFor="projectOrg">
+                    <span className="flex items-center gap-2">
+                      <Building className="h-4 w-4" />
+                      Organization
+                    </span>
+                  </Label>
+                  <Input
+                    id="projectOrg"
+                    value={newProjectForm.org}
+                    readOnly
+                    className="bg-secondary"
+                  />
+                </div>
+
+                {/* Project Leader Field - Searchable Select */}
+                <div className="space-y-2">
+                  <Label htmlFor="projectLeader">
+                    <span className="flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      Project Leader *
+                    </span>
+                  </Label>
+                  <Popover open={leaderSelectOpen} onOpenChange={setLeaderSelectOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={leaderSelectOpen}
+                        className="w-full justify-between"
+                        disabled={loadingLeaders}
+                      >
+                        {newProjectForm.projectLeader
+                          ? availableLeaders.find(leader => leader.id === newProjectForm.projectLeader)?.display_name || "Select leader..."
+                          : "Select leader..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                      <Command>
+                        <CommandInput 
+                          placeholder="Search leaders..." 
+                          value={leaderSearchTerm}
+                          onValueChange={setLeaderSearchTerm}
+                        />
+                        <CommandList>
+                          <CommandEmpty>{loadingLeaders ? "Loading..." : "No leaders found."}</CommandEmpty>
+                          <CommandGroup>
+                            {availableLeaders
+                              .filter(leader => leader.display_name.toLowerCase().includes(leaderSearchTerm.toLowerCase()))
+                              .map((leader) => (
+                              <CommandItem
+                                key={leader.id}
+                                value={leader.id}
+                                onSelect={(currentValue) => {
+                                  setNewProjectForm(prev => ({ ...prev, projectLeader: currentValue === newProjectForm.projectLeader ? "" : currentValue }));
+                                  setLeaderSelectOpen(false);
+                                  setLeaderSearchTerm("");
+                                }}
+                              >
+                                <Check
+                                  className={`mr-2 h-4 w-4 ${newProjectForm.projectLeader === leader.id ? "opacity-100" : "opacity-0"}`}
+                                />
+                                {leader.display_name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                
+                {/* GitHub Repository Field - Conditional Searchable Select / Input */}
+                <div className="space-y-2">
+                  <Label htmlFor="repository">
+                    <span className="flex items-center gap-2">
+                      <Github className="h-4 w-4" />
+                      GitHub Repository
+                    </span>
+                  </Label>
+                  {newProjectForm.org !== 'Personal' && githubOrgRepos.length > 0 ? (
+                    <Popover open={repoSelectOpen} onOpenChange={setRepoSelectOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={repoSelectOpen}
+                          className="w-full justify-between"
+                          disabled={loadingRepos}
+                        >
+                          {newProjectForm.repository
+                            ? githubOrgRepos.find(repo => repo.html_url === newProjectForm.repository)?.name || "Select repository..."
+                            : "Select repository..."}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                        <Command>
+                          <CommandInput 
+                            placeholder="Search repositories..."
+                            value={repoSearchTerm}
+                            onValueChange={setRepoSearchTerm}
+                          />
+                          <CommandList>
+                            <CommandEmpty>{loadingRepos ? "Loading..." : "No repositories found."}</CommandEmpty>
+                            <CommandGroup>
+                              {githubOrgRepos
+                                .filter(repo => repo.name.toLowerCase().includes(repoSearchTerm.toLowerCase()))
+                                .map((repo) => (
+                                <CommandItem
+                                  key={repo.id}
+                                  value={repo.html_url} // Use html_url as the value
+                                  onSelect={(currentValue) => {
+                                    const selectedRepoFullName = githubOrgRepos.find(r => r.html_url === currentValue)?.full_name;
+                                    setNewProjectForm(prev => ({ 
+                                      ...prev, 
+                                      repository: currentValue === prev.repository ? "" : currentValue,
+                                      // Potentially clear/update leader if repo changes
+                                    }));
+                                    setRepoSelectOpen(false);
+                                    setRepoSearchTerm("");
+                                    // Trigger fetching collaborators if a repo is selected
+                                    if (currentValue && selectedRepoFullName) {
+                                      fetchUsers(selectedRepoFullName); // Pass repoFullName to fetchUsers
+                                    } else if (!currentValue) { // If repo is deselected
+                                      fetchUsers(); // Fetch users based on org context only
+                                    }
+                                  }}
+                                >
+                                  <Check
+                                    className={`mr-2 h-4 w-4 ${newProjectForm.repository === repo.html_url ? "opacity-100" : "opacity-0"}`}
+                                  />
+                                  {repo.name}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  ) : (
+                    <Input
+                      id="repository"
+                      value={newProjectForm.repository}
+                      onChange={(e) => setNewProjectForm(prev => ({ ...prev, repository: e.target.value }))}
+                      placeholder="Enter GitHub repository URL (e.g., https://github.com/org/repo)"
+                      disabled={loadingRepos && newProjectForm.org !== 'Personal'}
+                    />
+                  )}
+                </div>
+
+
                 {/* Scoped Paths Section */}
                 <div className="space-y-4 border-t border-border pt-4 mt-4">
                   <Label className="text-base font-medium">Scoped Paths / Components</Label>
@@ -416,19 +730,25 @@ const Projects = () => {
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {projects
+        {projects // Keep existing filtering/mapping logic for displaying cards
           .filter((project) =>
             project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (project.description && project.description.toLowerCase().includes(searchTerm.toLowerCase()))
+            (project.description && project.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (project.org && project.org.toLowerCase().includes(searchTerm.toLowerCase())) // Add org search
           )
           .filter((project) => {
             if (filterStatus === 'all') return true;
-            // Assuming project status will be added to DB later, for now this filter won't do much
-            return project.status === filterStatus; 
+            return project.status === filterStatus; // Status filter remains (assuming status field exists)
           })
           .map((project) => (
-          <ProjectCard key={project.id} project={project} onProjectDeleted={handleProjectDeleted} />
-        ))}
+            <ProjectCard
+              key={project.id}
+              project={project}
+              onProjectDeleted={handleProjectDeleted}
+              // Pass leaders data for display on card if needed later
+              // availableLeaders={availableLeaders}
+            />
+          ))}
       </div>
     </div>
   );
