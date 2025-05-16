@@ -10,3 +10,4 @@ export { default as SettingsPage } from './Settings';
 export { default as OrganizationsPage } from './Organizations';
 export { default as AIIntegrationPage } from './AIIntegration';
 export { default as NotFoundPage } from './NotFound';
+export { default as AuthCallback } from './AuthCallback';

@@ -16,6 +16,7 @@ supabase functions deploy list-projects --project-ref $PROJECT_REF --no-verify-j
 supabase functions deploy list-tasks --project-ref $PROJECT_REF --no-verify-jwt && \
 supabase functions deploy mcp-gateway --project-ref $PROJECT_REF --no-verify-jwt && \
 supabase functions deploy update-task-status --project-ref $PROJECT_REF --no-verify-jwt && \
+supabase functions deploy github-auth --project-ref $PROJECT_REF --no-verify-jwt && \
 
 # Functions with default JWT verification (no --no-verify-jwt flag)
 supabase functions deploy add-project-member --project-ref $PROJECT_REF && \
@@ -28,6 +29,7 @@ supabase functions deploy list-api-keys --project-ref $PROJECT_REF && \
 supabase functions deploy list-github-org-members --project-ref $PROJECT_REF && \
 supabase functions deploy list-github-org-projects --project-ref $PROJECT_REF && \
 supabase functions deploy list-github-repo-collaborators --project-ref $PROJECT_REF && \
-supabase functions deploy update-project --project-ref $PROJECT_REF
+supabase functions deploy update-project --project-ref $PROJECT_REF && \
+supabase functions deploy github-repos --project-ref $PROJECT_REF                                 
 
 echo "All specified Edge Functions deployment commands executed."

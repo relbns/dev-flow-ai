@@ -14,6 +14,7 @@ import {
   NotFoundPage,
 } from '@/pages/index.jsx';
 import './App.css';
+import { AuthCallback } from './pages';
 
 // Define router configuration
 const router = createBrowserRouter([
@@ -53,6 +54,10 @@ const router = createBrowserRouter([
       {
         path: 'settings/ai-integration',
         element: <AIIntegrationPage />,
+      },
+      {
+        path: 'auth/callback',
+        element: <AuthCallback />,
       },
     ],
   },

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,6 +21,7 @@ import ThemeToggle from './ThemeToggle';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '../lib/supabaseClient'; // Import supabase
+import { getGitHubOrgs } from '../services/githubApi';
 
 const Header = ({
   title,
@@ -35,16 +36,72 @@ const Header = ({
   const location = useLocation();
   const { toast } = useToast();
 
+  const [loading, setLoading] = useState(false);
+  
+    // Function to handle fetching GitHub organizations
+    const fetchOrganizations = async () => {
+      try {
+        setLoading(true);
+        const orgs = await getGitHubOrgs();
+        // Update your state or call your onContextChange callback
+        // This depends on how your app is structured
+        if (typeof onContextChange === 'function' && Array.isArray(orgs)) {
+          // Map to the format your app expects
+          const formattedOrgs = orgs.map(org => ({
+            id: org.id,
+            login: org.login,
+            avatar_url: org.avatar_url
+          }));
+          // Update the organizations prop
+          // This assumes you're using some state management solution
+          onContextChange('updateOrganizations', formattedOrgs);
+        }
+      } catch (error) {
+        toast({
+          title: 'Failed to fetch organizations',
+          description: error.message || 'Please check your GitHub permissions',
+          variant: 'destructive',
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+  // Function to handle logout
+  async function handleLogout() {
+    try {
+      setLoading(true);
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      
+      toast({
+        title: 'Logged out',
+        description: 'You have been successfully logged out.',
+      });
+      
+      // Redirect to home page
+      navigate('/');
+    } catch (error) {
+      toast({
+        title: 'Logout Error',
+        description: error.message || 'Failed to logout',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleLoginWithGitHub() {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'github',
         options: {
           scopes: 'read:org repo user:email',
-          redirectTo: window.location.origin, // Redirect back to current page after login
+          redirectTo: window.location.origin + '/auth/callback', // Important!
           queryParams: {
-            access_type: 'offline', // Request a refresh token
-            prompt: 'consent',
+            // access_type: 'offline', // Removed, as GitHub doesn't formally use this. Refresh token issuance is usually an OAuth app setting.
+            prompt: 'consent', // Keep to ensure re-consent for any scope changes or testing.
           },
         },
       });
@@ -59,7 +116,7 @@ const Header = ({
     }
   }
 
-  async function handleLogout() {
+  async function handleLogout_old() {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;

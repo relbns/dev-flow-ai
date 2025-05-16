@@ -16,9 +16,10 @@ interface ProjectPayload {
   description?: string | null;
   guidelines?: string[];
   scopedPaths?: ScopedPath[];
-  org?: string | null; // Added org field
-  project_leader?: string | null; // Added project_leader field (user_id)
-  user_id_from_gateway?: string; // Added for gateway calls
+  github_org_id?: number | null; // Changed from org
+  github_org_login?: string | null; // Added for org login
+  project_leader?: string | null; 
+  user_id_from_gateway?: string; 
 }
 
 // Helper to create a Supabase client with service_role_key for admin operations
@@ -42,8 +43,9 @@ async function insertProjectData(
       name: payload.projectName,
       github_repo_url: payload.githubRepoURL || null,
       description: payload.description || null,
-      org: payload.org || null, // Insert org
-      project_leader: payload.project_leader || null, // Insert project_leader
+      github_org_id: payload.github_org_id || null, // Changed from org
+      github_org_login: payload.github_org_login || null, // Added for org login
+      project_leader: payload.project_leader || null, 
     })
     .select()
     .single();
@@ -141,7 +143,7 @@ serve(async (req: Request) => {
     // Use the same client that performed the insert (could be admin or user-context)
     const { data: newProjectDetails, error: fetchError } = await supabaseClientForQuery
       .from('projects')
-      .select('id, name, description, github_repo_url, created_at, updated_at, user_id, org, project_leader, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)') // Added org and project_leader
+      .select('id, name, description, github_repo_url, created_at, updated_at, user_id, github_org_id, github_org_login, project_leader, project_guidelines(id, guideline_text, "order"), scoped_paths(id, name, path_in_repo, notes)') // Updated org to github_org_id and github_org_login
       .eq('id', newProjectId)
       .eq('user_id', userIdForQuery) // Ensure we only fetch if it matches the user context
       .single();
