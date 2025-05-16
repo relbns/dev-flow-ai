@@ -35,16 +35,52 @@ serve(async (req: Request) => {
 
   try {
     const url = new URL(req.url);
-    // Parameters from query string (gateway will always call via GET)
-    const project_id = url.searchParams.get('project_id');
+    // Parameters from query string
+    let project_id_param: string | null = url.searchParams.get('project_id');
+    let org_id_param: string | null = url.searchParams.get('org_id');
     const userIdFromGateway = url.searchParams.get('user_id_from_gateway');
     // Optional filters for list-tasks
     const status_filter = url.searchParams.get('status_filter');
     const scoped_path_filter = url.searchParams.get('scoped_path_filter');
 
+    // Try to get parameters from request body if not in query string and method is POST
+    let requestBody: Record<string, any> = {};
+    if (req.method === 'POST') {
+      try {
+        requestBody = await req.json();
+        console.log("Request body:", requestBody);
+        
+        // If parameters not in query string, try to get from body
+        if (!project_id_param && requestBody.project_id) {
+          project_id_param = String(requestBody.project_id);
+        }
+        
+        // If org_id not in query string, try to get from body
+        if (!org_id_param && requestBody.org_id) {
+          org_id_param = String(requestBody.org_id);
+        }
+      } catch (error) {
+        console.log("No request body or error parsing it:", error);
+      }
+    }
 
-    if (!project_id) {
-      return new Response(JSON.stringify({ error: 'project_id query parameter is required' }), {
+    console.log("Parameters after checking both query and body:", {
+      project_id_param,
+      org_id_param,
+      userIdFromGateway,
+      status_filter,
+      scoped_path_filter,
+      method: req.method
+    });
+
+    if (!project_id_param && !org_id_param) {
+      return new Response(JSON.stringify({ error: 'Either project_id or org_id parameter is required' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
+      });
+    }
+    
+    if (project_id_param && org_id_param) {
+      return new Response(JSON.stringify({ error: 'Provide either project_id or org_id, not both.' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
       });
     }
@@ -54,7 +90,10 @@ serve(async (req: Request) => {
 
     if (userIdFromGateway) {
       // Called by gateway
-      console.log(`list-tasks called by gateway for user_id: ${userIdFromGateway}, project_id: ${project_id}`);
+      let logMessage = `list-tasks called by gateway for user_id: ${userIdFromGateway}`;
+      if (project_id_param) logMessage += `, project_id: ${project_id_param}`;
+      if (org_id_param) logMessage += `, org_id: ${org_id_param}`;
+      console.log(logMessage);
       userIdForQuery = userIdFromGateway;
       supabaseClientForQuery = createAdminClient();
     } else {
@@ -79,20 +118,66 @@ serve(async (req: Request) => {
       userIdForQuery = user.id;
     }
 
-    // Verify project ownership using the determined userIdForQuery
-    const isOwner = await verifyProjectOwnership(supabaseClientForQuery, userIdForQuery, project_id);
-    if (!isOwner) {
-      return new Response(JSON.stringify({ error: 'Access denied: User does not own this project or project not found.' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
-      });
+    let projectIdsToQuery: string[] = [];
+
+    if (project_id_param) {
+      // Verify project ownership using the determined userIdForQuery
+      const isOwner = await verifyProjectOwnership(supabaseClientForQuery, userIdForQuery, project_id_param);
+      if (!isOwner) {
+        return new Response(JSON.stringify({ error: 'Access denied: User does not own this project or project not found.' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
+        });
+      }
+      projectIdsToQuery.push(project_id_param);
+      console.log(`Fetching tasks for specific project ${project_id_param} by effective user_id: ${userIdForQuery}`);
+    } else if (org_id_param) {
+      console.log(`Fetching tasks for org_id ${org_id_param} by effective user_id: ${userIdForQuery}`);
+      let projectsQuery = supabaseClientForQuery
+        .from('projects')
+        .select('id')
+        .eq('user_id', userIdForQuery); // User must own the project record
+
+      if (org_id_param === 'personal') {
+        projectsQuery = projectsQuery.is('github_org_id', null);
+      } else {
+        const orgIdNum = parseInt(org_id_param, 10);
+        if (!isNaN(orgIdNum)) {
+          projectsQuery = projectsQuery.eq('github_org_id', orgIdNum);
+        } else {
+          console.warn(`Invalid org_id parameter: ${org_id_param}. Fetching no projects for this org.`);
+          // Return empty if org_id is invalid and not 'personal'
+           return new Response(JSON.stringify([]), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
+          });
+        }
+      }
+      
+      const { data: projectsData, error: projectsError } = await projectsQuery;
+      if (projectsError) {
+        console.error("Error fetching projects for org_id:", projectsError);
+        throw projectsError;
+      }
+      if (!projectsData || projectsData.length === 0) {
+        console.log("No projects found for this user and org_id. Returning empty task list.");
+        return new Response(JSON.stringify([]), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
+        });
+      }
+      projectIdsToQuery = projectsData.map(p => p.id);
+      console.log(`Found ${projectIdsToQuery.length} projects for org_id ${org_id_param}. Fetching their tasks.`);
     }
 
-    console.log(`Fetching tasks for project ${project_id} by effective user_id: ${userIdForQuery}`);
-
+    if (projectIdsToQuery.length === 0) {
+        console.log("No project IDs to query tasks for. Returning empty list.");
+        return new Response(JSON.stringify([]), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
+        });
+    }
+    
     let query = supabaseClientForQuery
       .from('tasks')
       .select('id, project_id, scoped_path_id, title, description, status, current_branch, pull_request_url, created_at, updated_at, scoped_paths(name, path_in_repo)')
-      .eq('project_id', project_id); // Already scoped by project ownership check
+      .in('project_id', projectIdsToQuery);
 
     if (status_filter) {
       query = query.eq('status', status_filter);
@@ -100,12 +185,6 @@ serve(async (req: Request) => {
     if (scoped_path_filter) {
       // This requires a join or a subquery if scoped_path_filter is by name.
       // For now, let's assume scoped_path_filter is by scoped_path_id if provided.
-      // If it's by name, the query needs to be more complex:
-      // query = query.eq('scoped_paths.name', scoped_path_filter); // This won't work directly
-      // A proper way would be to filter on a join or use a view.
-      // For simplicity, if scoped_path_filter is an ID:
-      // query = query.eq('scoped_path_id', scoped_path_filter);
-      // Let's keep it simple and assume scoped_path_filter is not implemented via name yet for this refactor.
       console.warn("scoped_path_filter by name is not fully implemented in this version of list-tasks for simplicity.");
     }
     
@@ -126,11 +205,9 @@ serve(async (req: Request) => {
     });
   } catch (err) {
     console.error("Overall error in list-tasks function:", err);
-    return new Response(JSON.stringify({ error: err.message || 'Failed to fetch tasks' }), {
+    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : 'Failed to fetch tasks' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
     });
   }
 });
-
-// To deploy: supabase functions deploy list-tasks --project-ref <your-project-ref> --no-verify-jwt

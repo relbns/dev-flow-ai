@@ -5,7 +5,7 @@
 # Supabase Cloud Instance (Remote)
 @supabase_project_ref = xfoxoiurhhqjjhqhoaaf
 @supabase_url = https://{{supabase_project_ref}}.supabase.co/functions/v1
-@supabase_anon_key = SUPABASE_ANON_KEY
+@supabase_anon_key = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhmb3hvaXVyaGhxampocWhvYWFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY4MDYyNDAsImV4cCI6MjA2MjM4MjI0MH0.u9xn9G9E9MSS2J0UqnzJXbMfPd1aeodWTTfgfcToOT4
 
 # User JWT - Get this after logging into your DevFlow AI web app
 @user_jwt = PASTE_YOUR_FRESH_USER_JWT_HERE
