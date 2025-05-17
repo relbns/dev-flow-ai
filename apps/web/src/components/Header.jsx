@@ -20,8 +20,8 @@ import {
 import ThemeToggle from './ThemeToggle';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '../lib/supabaseClient'; // Import supabase
-import { getGitHubOrgs } from '../services/githubApi';
+import { useAuth } from '@/hooks/useAuth';
+import { apiClient } from '@/lib/apiClient';
 
 const Header = ({
   title,
@@ -29,57 +29,49 @@ const Header = ({
   organization,
   organizations = [],
   onContextChange,
-  session,
 }) => {
-  // Added session prop
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+  const { user, loading: authLoading, logout } = useAuth();
 
   const [loading, setLoading] = useState(false);
-  
-    // Function to handle fetching GitHub organizations
-    const fetchOrganizations = async () => {
-      try {
-        setLoading(true);
-        const orgs = await getGitHubOrgs();
-        // Update your state or call your onContextChange callback
-        // This depends on how your app is structured
-        if (typeof onContextChange === 'function' && Array.isArray(orgs)) {
-          // Map to the format your app expects
-          const formattedOrgs = orgs.map(org => ({
-            id: org.id,
-            login: org.login,
-            avatar_url: org.avatar_url
-          }));
-          // Update the organizations prop
-          // This assumes you're using some state management solution
-          onContextChange('updateOrganizations', formattedOrgs);
-        }
-      } catch (error) {
-        toast({
-          title: 'Failed to fetch organizations',
-          description: error.message || 'Please check your GitHub permissions',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
 
-  // Function to handle logout
-  async function handleLogout() {
+  // Function to handle fetching GitHub organizations
+  const fetchOrganizations = async () => {
     try {
       setLoading(true);
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
+      const orgs = await apiClient.github.getOrganizations();
+      if (typeof onContextChange === 'function' && Array.isArray(orgs)) {
+        const formattedOrgs = orgs.map(org => ({
+          id: org.id,
+          login: org.login,
+          avatar_url: org.avatar_url
+        }));
+        onContextChange('updateOrganizations', formattedOrgs);
+      }
+    } catch (error) {
+      toast({
+        title: 'Failed to fetch organizations',
+        description: error.message || 'Please check your GitHub permissions',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Function to handle logout
+  const handleLogout = async () => {
+    try {
+      setLoading(true);
+      await apiClient.auth.logout();
+      logout(); // Also call the logout function from useAuth
       
       toast({
         title: 'Logged out',
         description: 'You have been successfully logged out.',
       });
-      
-      // Redirect to home page
       navigate('/');
     } catch (error) {
       toast({
@@ -90,76 +82,40 @@ const Header = ({
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  async function handleLoginWithGitHub() {
+  // Function to handle login with GitHub
+  const handleLoginWithGitHub = () => {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'github',
-        options: {
-          scopes: 'read:org repo user:email',
-          redirectTo: window.location.origin + '/auth/callback', // Important!
-          queryParams: {
-            // access_type: 'offline', // Removed, as GitHub doesn't formally use this. Refresh token issuance is usually an OAuth app setting.
-            prompt: 'consent', // Keep to ensure re-consent for any scope changes or testing.
-          },
-        },
-      });
-      if (error) throw error;
+      apiClient.auth.login();
     } catch (error) {
       toast({
         title: 'Login Error',
-        description: error.error_description || error.message,
+        description: error.message || 'Failed to initiate GitHub login',
         variant: 'destructive',
       });
-      console.error('Error logging in with GitHub:', error);
+      console.error('Error initiating GitHub login:', error);
     }
-  }
-
-  async function handleLogout_old() {
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      // Session will be cleared by onAuthStateChange in Layout, no need to navigate here explicitly
-      // unless you want to force a redirect to a public page.
-      toast({
-        title: 'Logged out',
-        description: 'You have been successfully logged out.',
-      });
-    } catch (error) {
-      toast({
-        title: 'Logout Error',
-        description: error.error_description || error.message,
-        variant: 'destructive',
-      });
-      console.error('Error logging out:', error);
-    }
-  }
+  };
 
   const handleBack = () => {
-    // Go up one level in the hierarchy
     const path = location.pathname;
 
     if (path.includes('/projects/')) {
-      // From specific project to projects list
       navigate('/projects');
     } else if (path.includes('/tasks/')) {
-      // From specific task to tasks list
       navigate('/tasks');
     } else if (path.includes('/settings/')) {
-      // If we're in a settings subpage, go back to main settings
       if (path !== '/settings') {
         navigate('/settings');
       } else {
         navigate('/');
       }
     } else {
-      // For any other case, go to the root
       navigate('/');
     }
   };
 
-  // Check if we're not on the root page
   const shouldShowBackButton = location.pathname !== '/';
 
   return (
@@ -225,20 +181,18 @@ const Header = ({
                   <DropdownMenuItem
                     key={org.id}
                     className="cursor-pointer"
-                    // Pass the correct structure expected by onContextChange, using org.login and other fields from the fetched data
                     onClick={() => onContextChange('organization', { id: org.id, name: org.login, avatar_url: org.avatar_url })}
                   >
                     <Building className="mr-2 h-4 w-4" />
-                    {/* Display org.login as the name */}
-                    <span>{org.login}</span> 
+                    <span>{org.login}</span>
                   </DropdownMenuItem>
                 ))}
-              
+
               {/* Add Request Permissions Item */}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="cursor-pointer text-muted-foreground"
-                onClick={handleLoginWithGitHub} // Re-use login function to prompt consent
+                onClick={handleLoginWithGitHub}
               >
                 <RefreshCw className="mr-2 h-4 w-4" />
                 <span>Request Org Permissions</span>
@@ -295,17 +249,14 @@ const Header = ({
           <ThemeToggle />
 
           {/* User Menu / Login Button */}
-          {session?.user ? (
+          {!authLoading && (user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="rounded-full">
-                  {session.user.user_metadata?.avatar_url ? (
+                  {user.avatarUrl ? (
                     <img
-                      src={session.user.user_metadata.avatar_url}
-                      alt={
-                        session.user.user_metadata?.full_name ||
-                        session.user.email
-                      }
+                      src={user.avatarUrl}
+                      alt={user.displayName || user.username}
                       className="h-6 w-6 rounded-full"
                     />
                   ) : (
@@ -315,7 +266,7 @@ const Header = ({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>
-                  {session.user.user_metadata?.full_name || session.user.email}
+                  {user.displayName || user.username}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate('/settings/profile')}>
@@ -324,11 +275,6 @@ const Header = ({
                 <DropdownMenuItem onClick={() => navigate('/settings')}>
                   Settings
                 </DropdownMenuItem>
-                {!session.provider_token && (
-                  <DropdownMenuItem onClick={handleLoginWithGitHub}>
-                    <RefreshCw className="mr-2 h-4 w-4" /> Reconnect GitHub
-                  </DropdownMenuItem>
-                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout}>
                   Log out
@@ -339,7 +285,7 @@ const Header = ({
             <Button variant="outline" onClick={handleLoginWithGitHub}>
               <LogIn className="mr-2 h-4 w-4" /> Login with GitHub
             </Button>
-          )}
+          ))}
         </div>
       </div>
     </header>

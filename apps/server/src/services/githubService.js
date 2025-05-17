@@ -1,7 +1,37 @@
 // src/services/githubService.js
 import axios from 'axios';
 import User from '../models/User.js';
-import { refreshUserGithubToken } from '../middleware/authMiddleware.js';
+import { refreshGithubToken } from './authService.js';
+
+// Function to refresh a user's GitHub token
+const refreshUserGithubToken = async (user) => {
+    try {
+        // Fetch user with token info
+        const userWithToken = await User.findById(user._id).select('+accessToken +refreshToken');
+        if (!userWithToken || !userWithToken.refreshToken) {
+            throw new Error('User or refresh token not found');
+        }
+
+        // Refresh the token
+        const tokenData = await refreshGithubToken(userWithToken.refreshToken);
+        
+        // Update the user with new token information
+        userWithToken.accessToken = tokenData.accessToken;
+        userWithToken.refreshToken = tokenData.refreshToken;
+        
+        // Calculate new expiration time
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + (tokenData.expiresIn || 3600 * 8));
+        userWithToken.tokenExpiresAt = expiresAt;
+        
+        await userWithToken.save();
+        
+        return tokenData.accessToken;
+    } catch (error) {
+        console.error('Failed to refresh GitHub token:', error);
+        throw new Error('GitHub authentication expired. Please login again.');
+    }
+};
 
 // Create configured GitHub API client
 const createGithubClient = (accessToken) => {
@@ -277,7 +307,6 @@ export const fetchRepoCollaborators = async (user, repoOwner, repoName) => {
             }
         }
 
-        // src/services/githubService.js (continued)
         console.error(`Error fetching collaborators for ${repoOwner}/${repoName}:`, error);
         throw error;
     }

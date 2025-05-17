@@ -1,63 +1,81 @@
 // src/services/githubApi.js
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient';
 
-// Store GitHub token after OAuth login
-export const storeGitHubToken = async (providerToken) => {
-    console.log("Attempting to store GitHub token. Token exists:", !!providerToken);
-    
-    if (!providerToken) {
-      console.error("No provider token available to store");
-      throw new Error("No GitHub token available to store");
-    }
-    
-    try {
-      const { data, error } = await supabase.functions.invoke('github-auth', {
-        body: { token: providerToken },
-        query: { action: 'store-token' },
-        method: 'POST',
-      });
-      
-      if (error) {
-        console.error("Error response from github-auth function:", error);
-        throw error;
-      }
-      
-      console.log("GitHub token stored successfully. Response:", data);
-      return data;
-    } catch (error) {
-      console.error('Error storing GitHub token:', error);
-      throw error;
-    }
-  };
-
-// Get GitHub organizations
+/**
+ * Fetch GitHub organizations for the authenticated user
+ * @returns {Promise<Array>} - Array of GitHub organization objects
+ */
 export const getGitHubOrgs = async () => {
-    try {
-        const { data, error } = await supabase.functions.invoke(
-            'get-github-user-organizations',
-            { method: 'POST' }
-        );
-
-        if (error) throw error;
-        return data;
-    } catch (error) {
-        console.error('Error fetching GitHub organizations:', error);
-        throw error;
+  try {
+    const response = await fetch('/api/github/organizations', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('jwtToken')}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to fetch GitHub organizations');
     }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching GitHub organizations:', error);
+    throw error;
+  }
 };
 
-// Get organization repositories
-export const getOrgRepos = async (orgName) => {
-    try {
-        const { data, error } = await supabase.functions.invoke('github-repos', {
-            method: 'POST',
-            query: { org: orgName },
-        });
-
-        if (error) throw error;
-        return data;
-    } catch (error) {
-        console.error(`Error fetching repositories for ${orgName}:`, error);
-        throw error;
+/**
+ * Fetch repositories for the authenticated user or specified organization
+ * @param {string} orgName - Optional GitHub organization name
+ * @returns {Promise<Array>} - Array of repository objects
+ */
+export const getRepositories = async (orgName) => {
+  try {
+    const response = await fetch(`/api/github/repositories${orgName ? `?org=${orgName}` : ''}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('jwtToken')}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to fetch repositories');
     }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching repositories:', error);
+    throw error;
+  }
+};
+
+/**
+ * Initiates GitHub OAuth flow
+ * @returns {Promise<string>} - The URL to redirect to for GitHub authentication
+ */
+export const getGitHubAuthUrl = async () => {
+  try {
+    const response = await fetch('/api/auth/github/login');
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to get GitHub auth URL');
+    }
+    
+    const data = await response.json();
+    return data.url;
+  } catch (error) {
+    console.error('Error getting GitHub auth URL:', error);
+    throw error;
+  }
+};
+
+/**
+ * Handles the GitHub login flow
+ */
+export const handleGitHubLogin = () => {
+  window.location.href = '/api/auth/github/login';
 };

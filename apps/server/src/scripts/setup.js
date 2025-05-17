@@ -1,54 +1,52 @@
-// src/scripts/setup.js
-import dotenv from 'dotenv';
+// setup.js
 import mongoose from 'mongoose';
+import dotenv from 'dotenv';
 import User from '../models/User.js';
+import Project from '../models/Project.js';
+import Task from '../models/Task.js';
 import ApiKey from '../models/ApiKey.js';
 
 dotenv.config();
 
-const setupDevEnvironment = async () => {
-    try {
-        console.log('Connecting to MongoDB...');
-        await mongoose.connect(process.env.MONGODB_URI);
-        console.log(`Connected to MongoDB, database: ${process.env.MONGODB_URI}`);
+const setupDatabase = async () => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log('Connected to MongoDB');
 
-        // Check if admin user exists
-        const adminUser = await User.findOne({ username: 'admin' });
+    // Check if collections exist
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    const collectionNames = collections.map(collection => collection.name);
 
-        if (!adminUser) {
-            console.log('Creating admin user...');
-            const newAdmin = new User({
-                githubId: 'admin',
-                username: 'admin',
-                displayName: 'Admin User',
-                email: 'admin@example.com',
-                accessToken: 'fake-token',
-                tokenExpiresAt: new Date(Date.now() + 3600000)
-            });
+    console.log('Existing collections:', collectionNames);
 
-            await newAdmin.save();
-            console.log('Admin user created');
-
-            // Create an API key for the admin
-            const apiKey = await ApiKey.generateKey(
-                newAdmin._id,
-                'Development API Key',
-                [],
-                ['read', 'write', 'admin']
-            );
-
-            await apiKey.save();
-            console.log('API key created for admin:', apiKey.key);
-        } else {
-            console.log('Admin user already exists');
-        }
-
-        console.log('Dev environment setup completed');
-    } catch (error) {
-        console.error('Error setting up dev environment:', error);
-    } finally {
-        await mongoose.disconnect();
+    // Create indexes for better query performance
+    if (collectionNames.includes('users')) {
+      await User.createIndexes();
+      console.log('User indexes created');
     }
+
+    if (collectionNames.includes('projects')) {
+      await Project.createIndexes();
+      console.log('Project indexes created');
+    }
+
+    if (collectionNames.includes('tasks')) {
+      await Task.createIndexes();
+      console.log('Task indexes created');
+    }
+
+    if (collectionNames.includes('apikeys')) {
+      await ApiKey.createIndexes();
+      console.log('ApiKey indexes created');
+    }
+
+    console.log('Database setup completed successfully');
+  } catch (error) {
+    console.error('Database setup failed:', error);
+  } finally {
+    await mongoose.disconnect();
+    console.log('Disconnected from MongoDB');
+  }
 };
 
-setupDevEnvironment();
+setupDatabase();

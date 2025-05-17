@@ -2,7 +2,7 @@
 import Project from '../models/Project.js';
 import Task from '../models/Task.js';
 import User from '../models/User.js';
-import { fetchRepoContent } from './githubService.js';
+import { fetchRepoContent, createGithubIssue } from './githubService.js';
 
 // Get project context for AI agent
 export const getProjectContext = async (projectId, apiKey) => {
@@ -15,7 +15,7 @@ export const getProjectContext = async (projectId, apiKey) => {
             throw new Error('Project not found');
         }
 
-        // Check API key access
+        // Check API key access - using the projects array from the apiKey
         const hasAccess = apiKey.projects.some(id => id.toString() === projectId);
 
         if (!hasAccess && !apiKey.projects.includes('*')) {
@@ -62,8 +62,6 @@ export const getProjectTasks = async (projectId, apiKey, filters = {}) => {
             throw new Error('Project not found');
         }
 
-        // Check API key access
-        // src/services/mcpService.js (continued)
         // Check API key access
         const hasAccess = apiKey.projects.some(id => id.toString() === projectId);
 
@@ -208,11 +206,18 @@ export const createTaskFromAi = async (projectId, apiKey, taskData) => {
 
         // Find assignee if specified by username
         let assigneeId = null;
+        let assignee = null;
         if (taskData.assignee) {
-            const assignee = await User.findOne({ username: taskData.assignee });
+            assignee = await User.findOne({ username: taskData.assignee });
             if (assignee) {
                 assigneeId = assignee._id;
             }
+        }
+
+        // Get user from apiKey
+        const user = await User.findById(apiKey.user);
+        if (!user) {
+            throw new Error('API key user not found');
         }
 
         // Create task
@@ -222,7 +227,7 @@ export const createTaskFromAi = async (projectId, apiKey, taskData) => {
             status: taskData.status || 'todo',
             priority: taskData.priority || 'medium',
             project: projectId,
-            creator: apiKey.user._id, // API key user is the creator
+            creator: user._id, // API key user is the creator
             assignee: assigneeId,
             dueDate: taskData.dueDate || null,
             tags: taskData.tags || [],
@@ -239,7 +244,7 @@ export const createTaskFromAi = async (projectId, apiKey, taskData) => {
                 };
 
                 const issue = await createGithubIssue(
-                    { _id: apiKey.user._id },
+                    user,
                     project.githubRepo.owner.login,
                     project.githubRepo.name,
                     issueData
@@ -293,9 +298,15 @@ export const addCommentFromAi = async (projectId, taskId, apiKey, commentData) =
             throw new Error('Task not found or does not belong to the project');
         }
 
+        // Get user from apiKey
+        const user = await User.findById(apiKey.user);
+        if (!user) {
+            throw new Error('API key user not found');
+        }
+
         // Add comment
         task.comments.push({
-            author: apiKey.user._id,
+            author: user._id,
             content: commentData.content,
             isAiGenerated: true
         });

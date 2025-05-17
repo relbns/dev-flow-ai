@@ -1,7 +1,7 @@
-
 import React from 'react';
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import Layout from '@/components/Layout';
+import ProtectedRoute from '@/components/ProtectedRoute';
 import {
   IndexPage,
   ProjectsPage,
@@ -12,9 +12,11 @@ import {
   OrganizationsPage,
   AIIntegrationPage,
   NotFoundPage,
+  AuthCallback,
+  Dashboard,
 } from '@/pages/index.jsx';
 import './App.css';
-import { AuthCallback } from './pages';
+import { AuthProvider } from '@/hooks/useAuth';
 
 // Define router configuration
 const router = createBrowserRouter([
@@ -28,32 +30,68 @@ const router = createBrowserRouter([
         element: <IndexPage />,
       },
       {
+        path: 'dashboard',
+        element: (
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        ),
+      },
+      {
         path: 'projects',
-        element: <ProjectsPage />,
+        element: (
+          <ProtectedRoute>
+            <ProjectsPage />
+          </ProtectedRoute>
+        ),
       },
       {
         path: 'projects/:id',
-        element: <ProjectPage />,
+        element: (
+          <ProtectedRoute>
+            <ProjectPage />
+          </ProtectedRoute>
+        ),
       },
       {
         path: 'tasks',
-        element: <TasksPage />,
+        element: (
+          <ProtectedRoute>
+            <TasksPage />
+          </ProtectedRoute>
+        ),
       },
       {
         path: 'tasks/:id',
-        element: <TaskDetailPage />,
+        element: (
+          <ProtectedRoute>
+            <TaskDetailPage />
+          </ProtectedRoute>
+        ),
       },
       {
         path: 'settings',
-        element: <SettingsPage />,
+        element: (
+          <ProtectedRoute>
+            <SettingsPage />
+          </ProtectedRoute>
+        ),
       },
       {
         path: 'settings/organizations',
-        element: <OrganizationsPage />,
+        element: (
+          <ProtectedRoute>
+            <OrganizationsPage />
+          </ProtectedRoute>
+        ),
       },
       {
         path: 'settings/ai-integration',
-        element: <AIIntegrationPage />,
+        element: (
+          <ProtectedRoute>
+            <AIIntegrationPage />
+          </ProtectedRoute>
+        ),
       },
       {
         path: 'auth/callback',
@@ -67,7 +105,9 @@ const router = createBrowserRouter([
 const App = () => {
   return (
     <React.StrictMode>
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
     </React.StrictMode>
   );
 };

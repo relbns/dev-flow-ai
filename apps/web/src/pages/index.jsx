@@ -11,3 +11,4 @@ export { default as OrganizationsPage } from './Organizations';
 export { default as AIIntegrationPage } from './AIIntegration';
 export { default as NotFoundPage } from './NotFound';
 export { default as AuthCallback } from './AuthCallback';
+export { default as Dashboard } from './Dashboard';

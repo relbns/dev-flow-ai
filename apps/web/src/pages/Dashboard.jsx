@@ -13,18 +13,18 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-  DialogTrigger, // Added for potential direct trigger usage if needed later
+  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient'; // Import apiClient directly
 import { useToast } from "@/hooks/use-toast";
-import { Toaster } from "@/components/ui/toaster"; // Import Toaster component
+import { Toaster } from "@/components/ui/toaster";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { contextType, selectedOrganization } = useOutletContext(); // Get context from Layout
+  const { contextType, selectedOrganization } = useOutletContext();
   const [recentProjectsData, setRecentProjectsData] = useState([]);
   const [myTasksData, setMyTasksData] = useState([]);
   const [dashboardStats, setDashboardStats] = useState([
@@ -56,56 +56,37 @@ const Dashboard = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      // Determine the org_id to use for filtering.
-      // If contextType is 'organization' and an organization is selected, use its ID.
-      // Otherwise, org_id will be undefined/null, and functions should fetch personal data or handle as appropriate.
       const org_id = contextType === 'organization' && selectedOrganization ? selectedOrganization.id : null;
       console.log(`Dashboard: Fetching data for context: ${contextType}, org_id: ${org_id}`);
 
       try {
-        // Fetch recent projects, passing org_id if available
+        // Use direct API client instead of Supabase
+        // Fetch projects
         const projectParams = { limit: 5 };
         if (org_id) {
           projectParams.org_id = org_id;
         }
-        const { data: projects, error: projectsError } = await supabase.functions.invoke('list-projects', {
-          method: 'POST',
-          body: projectParams
-        });
-        if (projectsError) throw projectsError;
+        
+        // Use the direct API call
+        const projects = await apiClient.projects.list(projectParams);
         setRecentProjectsData(projects || []);
 
-        // For tasks, we'll try a different approach since we're having issues with query parameters
-        // We'll use a project_id parameter for personal context
+        // Fetch tasks
         try {
-          let tasksResponse;
+          let tasks;
           if (org_id) {
-            // For organization context, use org_id
-            tasksResponse = await supabase.functions.invoke('list-tasks', {
-              method: 'GET',
-              query: { org_id: org_id.toString() }
-            });
+            tasks = await apiClient.tasks.list({ org_id: org_id.toString() });
           } else {
-            // For personal context
-            tasksResponse = await supabase.functions.invoke('list-tasks', {
-              method: 'GET',
-              query: { org_id: 'personal' }
-            });
+            tasks = await apiClient.tasks.list({ org_id: 'personal' });
           }
           
-          const { data: tasks, error: tasksError } = tasksResponse;
-          
-          if (tasksError) throw tasksError;
           const fetchedTasks = tasks || [];
           setMyTasksData(fetchedTasks);
 
-          // Calculate stats based on fetched tasks
+          // Calculate stats
           const totalTasks = fetchedTasks.length;
-          // Assuming task object has a 'status' field (e.g., 'completed', 'in_progress', 'todo')
           const completedTasks = fetchedTasks.filter(task => task.status && task.status.toLowerCase() === 'completed').length;
-          // Assuming task object has a 'due_date' field
           const dueTodayTasks = fetchedTasks.filter(task => isToday(task.due_date)).length;
-          // Assuming task object has a 'priority' field (e.g., 'high', 'medium', 'low')
           const highPriorityTasks = fetchedTasks.filter(task => task.priority && task.priority.toLowerCase() === 'high').length;
 
           setDashboardStats([
@@ -134,7 +115,7 @@ const Dashboard = () => {
     };
 
     fetchData();
-  }, [contextType, selectedOrganization, toast]); // Re-fetch when context or selected org changes
+  }, [contextType, selectedOrganization, toast]);
 
   const handleTaskClick = (taskId) => {
     navigate(`/tasks/${taskId}`);
@@ -146,37 +127,29 @@ const Dashboard = () => {
       const projectPayload = {
         name: newProjectForm.name,
         description: newProjectForm.description,
-        // Add other relevant fields from newProjectForm
       };
-      // If an organization is selected, associate the new project with it
+      
       if (contextType === 'organization' && selectedOrganization) {
         projectPayload.org_id = selectedOrganization.id;
       }
 
-      const { data, error } = await supabase.functions.invoke('create-project', {
-        method: 'POST',
-        body: projectPayload
-      });
-
-      if (error) throw error;
-
-      console.log('New Project Created:', data);
+      // Use direct API client
+      const newProject = await apiClient.projects.create(projectPayload);
+      
+      console.log('New Project Created:', newProject);
       toast({ 
         title: "Project Created", 
         description: `${newProjectForm.name} has been created.` 
       });
       setOpenNewProjectDialog(false);
       
-      // Re-fetch projects to update the list, considering the current context
+      // Re-fetch projects
       const projectParams = { limit: 5 };
       if (contextType === 'organization' && selectedOrganization) {
         projectParams.org_id = selectedOrganization.id;
       }
-      const { data: projects, error: projectsError } = await supabase.functions.invoke('list-projects', {
-        method: 'POST',
-        body: projectParams
-      });
-      if (projectsError) throw projectsError;
+      
+      const projects = await apiClient.projects.list(projectParams);
       setRecentProjectsData(projects || []);
 
       setNewProjectForm({
@@ -187,7 +160,7 @@ const Dashboard = () => {
         designUrl: '',
         client: '',
         dueDate: '',
-      }); // Reset form
+      });
     } catch (error) {
       console.error('Error creating project:', error);
       toast({ 
@@ -305,7 +278,7 @@ const Dashboard = () => {
           </form>
         </DialogContent>
       </Dialog>
-      <Toaster /> {/* Add Toaster component here */}
+      <Toaster />
     </div>
   );
 };

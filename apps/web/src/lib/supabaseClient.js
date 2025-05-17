@@ -1,13 +1,15 @@
-import { createClient } from '@supabase/supabase-js';
+// Completely replace the file with this content
+// This will prevent any imports from the old supabaseClient
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// src/lib/supabaseClient.js
+// This is now just a wrapper that redirects to apiClient
+import { supabase as apiSupabase } from './apiClient';
 
-if (!supabaseUrl) {
-  throw new Error("Supabase URL not found. Did you forget to create an .env file with VITE_SUPABASE_URL?");
-}
-if (!supabaseAnonKey) {
-  throw new Error("Supabase Anon Key not found. Did you forget to create an .env file with VITE_SUPABASE_ANON_KEY?");
-}
+// Export apiClient's supabase interface
+export const supabase = apiSupabase;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// If anyone imports createClient, throw an error to prevent Supabase usage
+export const createClient = () => {
+  console.error('DEPRECATED: Direct Supabase usage is deprecated. Please use apiClient instead.');
+  throw new Error('Direct Supabase usage is deprecated. Please use apiClient instead.');
+};

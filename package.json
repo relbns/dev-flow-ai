@@ -1,35 +1,24 @@
 {
-  "name": "dev-flow-ai-monorepo",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Monorepo for DevFlow AI application, web frontend, local agent, and Supabase functions.",
+  "name": "dev-flow-ai",
+  "version": "1.0.0",
+  "description": "Developer workflow automation tools",
+  "main": "index.js",
   "scripts": {
-    "dev": "npm run dev --workspace=@dev-flow-ai/web",
-    "build": "npm run build --workspace=@dev-flow-ai/web",
-    "lint": "npm run lint --workspace=@dev-flow-ai/web",
-    "local-agent:start-server": "npm start --workspace=@devflow-ai/local-agent-cli",
-    "local-agent:cli": "npm run cli --workspace=@devflow-ai/local-agent-cli --",
-    "local-agent:list-files": "npm run local-agent:cli -- list-files ../..",
-    "local-agent:list-files-recursive": "npm run local-agent:cli -- list-files ../.. -r",
-    "local-agent:write-test-file": "npm run local-agent:cli -- write-file-content ../../test-cli-write.txt \"Hello from CLI test script\"",
-    "local-agent": "npm run local-agent:start-server",
-    "supabase:start": "echo \"Ensure Supabase CLI is installed. Run: supabase start\"",
-    "supabase:deploy": "echo \"Ensure Supabase CLI is installed. Run: supabase functions deploy --project-ref <YOUR-PROJECT-REF>\"",
-    "deploy:edge-functions": "cd supabase && sh ./functions/deploy_all_edge_functions.sh && cd .."
+    "start:server": "cd apps/server && npm start",
+    "start:web": "cd apps/web && npm run dev",
+    "dev": "concurrently \"npm run start:server\" \"npm run start:web\"",
+    "setup:server": "cd apps/server && npm run setup",
+    "setup": "npm install && npm run setup:server"
   },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
   "keywords": [
-    "ai",
-    "developer-tools",
-    "kanban",
-    "github",
-    "mcp",
-    "supabase",
-    "react"
+    "development",
+    "workflow",
+    "automation",
+    "ai"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "concurrently": "^8.2.2"
+  }
 }

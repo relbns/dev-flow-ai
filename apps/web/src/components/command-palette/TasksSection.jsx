@@ -6,7 +6,7 @@ import {
   CommandItem,
   CommandSeparator
 } from '@/components/ui/command';
-import { CheckSquare, CircleCheck } from 'lucide-react';
+import { CheckSquare, CheckCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { tasks } from './mockData';
 
@@ -42,7 +42,7 @@ const TasksSection = ({ runCommand }) => {
             
             <div className="flex gap-2">
               {task.status !== 'completed' && (
-                <CircleCheck 
+                <CheckCircle 
                   className="h-4 w-4 text-green-500 cursor-pointer hover:text-green-700" 
                   onClick={(e) => {
                     e.stopPropagation();
