@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
@@ -18,6 +18,7 @@ const Layout = () => {
   const [organization, setOrganization] = useState(null);
   const [organizations, setOrganizations] = useState([]);
   const [loadingOrgs, setLoadingOrgs] = useState(false);
+  const orgsLoadedRef = useRef(false); // Ref to track if organizations were loaded
   const location = useLocation();
   const { toast } = useToast();
 
@@ -55,9 +56,14 @@ const Layout = () => {
     }
   }, [location.pathname, user, authLoading, navigate, toast]);
 
-  // Effect to fetch GitHub organizations when user is authenticated
+  // Effect to fetch GitHub organizations when user is authenticated - with proper control to prevent infinite loops
   useEffect(() => {
-    if (user && !authLoading && !loadingOrgs) {
+    // Only fetch if:
+    // 1. User is authenticated
+    // 2. Not currently loading auth state
+    // 3. Not currently loading organizations
+    // 4. Organizations haven't been loaded yet (using ref to track)
+    if (user && !authLoading && !loadingOrgs && !orgsLoadedRef.current) {
       const fetchUserOrganizations = async () => {
         console.log("Layout.jsx: Attempting to fetch user organizations from backend.");
         setLoadingOrgs(true);
@@ -65,6 +71,7 @@ const Layout = () => {
           const orgs = await apiClient.github.getOrganizations();
           console.log("Layout.jsx: Orgs fetched successfully from backend:", orgs);
           setOrganizations(orgs || []);
+          orgsLoadedRef.current = true; // Mark organizations as loaded
         } catch (error) {
           console.error("Layout.jsx: Error fetching organizations:", error);
           toast({
@@ -73,6 +80,8 @@ const Layout = () => {
             variant: "destructive",
           });
           setOrganizations([]);
+          // Even on error, mark as loaded to prevent retries - user can manually refresh
+          orgsLoadedRef.current = true;
         } finally {
           setLoadingOrgs(false);
         }
@@ -80,12 +89,13 @@ const Layout = () => {
 
       fetchUserOrganizations();
     } else if (!user && !authLoading) {
-      // If user logs out, clear organizations
+      // If user logs out, clear organizations and reset loaded flag
       console.log("Layout.jsx: User logged out. Clearing organizations.");
       setOrganizations([]);
       setLoadingOrgs(false);
+      orgsLoadedRef.current = false; // Reset loaded flag on logout
     }
-  }, [user, authLoading, loadingOrgs, toast]);
+  }, [user, authLoading, toast]); // Removed loadingOrgs from dependencies to prevent infinite loops
 
   // Effect to rehydrate organization from localStorage once organizations are fetched
   useEffect(() => {

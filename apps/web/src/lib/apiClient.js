@@ -1,5 +1,69 @@
-// apiClient.js
+// Helper function to clear rate limit tracker
+export const clearRateLimitTracking = () => {
+  // Clear any stored rate limit information
+  localStorage.removeItem('rateLimitedEndpoints');
+  console.log('Rate limit tracking has been cleared');
+};
+
+// apiClient.js - Error handling improvements for rate limiting
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+
+// Track rate limited endpoints to avoid repeated requests
+// We'll store in localStorage to persist across page reloads
+const getRateLimitedEndpoints = () => {
+  try {
+    const stored = localStorage.getItem('rateLimitedEndpoints');
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.warn('Failed to parse rate limited endpoints from localStorage');
+  }
+  return {};
+};
+
+const addRateLimitedEndpoint = (endpoint, retryAfter = 60) => {
+  try {
+    const rateLimited = getRateLimitedEndpoints();
+    rateLimited[endpoint] = Date.now() + (retryAfter * 1000);
+    localStorage.setItem('rateLimitedEndpoints', JSON.stringify(rateLimited));
+  } catch (e) {
+    console.warn('Failed to store rate limited endpoint to localStorage');
+  }
+};
+
+const removeRateLimitedEndpoint = (endpoint) => {
+  try {
+    const rateLimited = getRateLimitedEndpoints();
+    delete rateLimited[endpoint];
+    localStorage.setItem('rateLimitedEndpoints', JSON.stringify(rateLimited));
+  } catch (e) {
+    console.warn('Failed to remove rate limited endpoint from localStorage');
+  }
+};
+
+const isRateLimited = (endpoint) => {
+  try {
+    const rateLimited = getRateLimitedEndpoints();
+    const limitUntil = rateLimited[endpoint];
+    
+    if (limitUntil && Date.now() < limitUntil) {
+      const secondsRemaining = Math.ceil((limitUntil - Date.now()) / 1000);
+      console.warn(`Endpoint ${endpoint} is rate limited for ${secondsRemaining} more seconds`);
+      return true;
+    }
+    
+    // If expired, remove the rate limit
+    if (limitUntil) {
+      removeRateLimitedEndpoint(endpoint);
+    }
+    
+    return false;
+  } catch (e) {
+    console.warn('Failed to check rate limited status');
+    return false;
+  }
+};
 
 // Helper function to get JWT token or null if not present
 const getAuthToken = () => {
@@ -22,6 +86,53 @@ const getAuthHeaders = () => {
   }
   
   return headers;
+};
+
+// Helper function to handle API responses
+const handleApiResponse = async (response, endpoint) => {
+  // Handle rate limiting
+  if (response.status === 429) {
+    // Get retry-after header if available
+    const retryAfter = parseInt(response.headers.get('Retry-After') || '60', 10);
+    
+    // Add to rate limited storage
+    addRateLimitedEndpoint(endpoint, retryAfter);
+    
+    console.warn(`Rate limited for endpoint: ${endpoint}. Retry after ${retryAfter} seconds.`);
+    
+    throw new Error(`Too many requests. Please try again in ${retryAfter} seconds.`);
+  }
+  
+  // Handle authentication errors
+  if (response.status === 401) {
+    console.warn('Authentication required. Redirecting to login...');
+    return null;
+  }
+  
+  // Handle other errors
+  if (!response.ok) {
+    try {
+      const error = await response.json();
+      throw new Error(error.message || error.error || `Request failed with status ${response.status}`);
+    } catch (e) {
+      // If error response is not JSON
+      if (e instanceof SyntaxError) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+      throw e;
+    }
+  }
+  
+  // Parse JSON response
+  try {
+    return await response.json();
+  } catch (e) {
+    // Handle empty response
+    if (response.status === 204) {
+      return null;
+    }
+    throw new Error('Failed to parse response JSON');
+  }
 };
 
 /**
@@ -48,22 +159,18 @@ export const apiClient = {
         url += `?${queryParams.toString()}`;
       }
       
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        return [];
+      }
+      
       try {
         const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          return []; // Return empty array instead of throwing
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to fetch tasks');
-        }
-        
-        return await response.json();
+        const data = await handleApiResponse(response, url);
+        return data || [];
       } catch (error) {
         console.error('Error fetching tasks:', error);
         return []; // Return empty array on error for more graceful handling
@@ -71,22 +178,19 @@ export const apiClient = {
     },
     
     getDetails: async (taskId) => {
+      const url = `${BASE_URL}/tasks/${taskId}`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/tasks/${taskId}`, {
+        const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          return null;
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to fetch task details');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error fetching task details:', error);
         throw error;
@@ -94,24 +198,21 @@ export const apiClient = {
     },
     
     create: async (taskData) => {
+      const url = `${BASE_URL}/tasks`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/tasks`, {
+        const response = await fetch(url, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify(taskData),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          throw new Error('Authentication required');
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to create task');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error creating task:', error);
         throw error;
@@ -119,24 +220,21 @@ export const apiClient = {
     },
     
     updateStatus: async (taskId, statusData) => {
+      const url = `${BASE_URL}/tasks/${taskId}`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/tasks/${taskId}`, {
+        const response = await fetch(url, {
           method: 'PATCH',
           headers: getAuthHeaders(),
           body: JSON.stringify({ status: statusData.status }),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          throw new Error('Authentication required');
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to update task status');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error updating task status:', error);
         throw error;
@@ -144,24 +242,21 @@ export const apiClient = {
     },
     
     addComment: async (taskId, commentData) => {
+      const url = `${BASE_URL}/tasks/${taskId}/comments`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/tasks/${taskId}/comments`, {
+        const response = await fetch(url, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify(commentData),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          throw new Error('Authentication required');
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to add comment');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error adding comment:', error);
         throw error;
@@ -183,22 +278,18 @@ export const apiClient = {
         url += `?${queryParams.toString()}`;
       }
       
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        return [];
+      }
+      
       try {
         const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          return []; // Return empty array instead of throwing
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to fetch projects');
-        }
-        
-        return await response.json();
+        const data = await handleApiResponse(response, url);
+        return data || [];
       } catch (error) {
         console.error('Error fetching projects:', error);
         return []; // Return empty array on error for more graceful handling
@@ -206,22 +297,19 @@ export const apiClient = {
     },
     
     getDetails: async (projectId) => {
+      const url = `${BASE_URL}/projects/${projectId}`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/projects/${projectId}`, {
+        const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          return null;
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to fetch project details');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error fetching project details:', error);
         throw error;
@@ -229,24 +317,21 @@ export const apiClient = {
     },
     
     create: async (projectData) => {
+      const url = `${BASE_URL}/projects`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/projects`, {
+        const response = await fetch(url, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify(projectData),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          throw new Error('Authentication required');
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to create project');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error creating project:', error);
         throw error;
@@ -254,24 +339,21 @@ export const apiClient = {
     },
     
     update: async (projectId, projectData) => {
+      const url = `${BASE_URL}/projects/${projectId}`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/projects/${projectId}`, {
+        const response = await fetch(url, {
           method: 'PATCH',
           headers: getAuthHeaders(),
           body: JSON.stringify(projectData),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          throw new Error('Authentication required');
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to update project');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error updating project:', error);
         throw error;
@@ -282,16 +364,16 @@ export const apiClient = {
   // GitHub-related methods
   github: {
     getAuthUrl: async () => {
+      const url = `${BASE_URL}/auth/github/login`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/auth/github/login`);
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to get GitHub auth URL');
-        }
-        
-        const data = await response.json();
-        return data.url;
+        const response = await fetch(url);
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error getting GitHub auth URL:', error);
         throw error;
@@ -299,22 +381,21 @@ export const apiClient = {
     },
     
     getOrganizations: async () => {
+      const url = `${BASE_URL}/github/organizations`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        console.warn('GitHub organizations endpoint is rate limited, returning empty array');
+        return []; // Return empty array when rate limited
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/github/organizations`, {
+        const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          return []; // Return empty array for graceful handling
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to fetch GitHub organizations');
-        }
-        
-        return await response.json();
+        const data = await handleApiResponse(response, url);
+        return data || [];
       } catch (error) {
         console.error('Error fetching GitHub organizations:', error);
         return []; // Return empty array on error for graceful handling
@@ -322,22 +403,21 @@ export const apiClient = {
     },
     
     getRepositories: async (orgName) => {
+      const url = `${BASE_URL}/github/repositories${orgName ? `?org=${orgName}` : ''}`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        console.warn('GitHub repositories endpoint is rate limited, returning empty array');
+        return []; // Return empty array when rate limited
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/github/repositories${orgName ? `?org=${orgName}` : ''}`, {
+        const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          return []; // Return empty array for graceful handling
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to fetch GitHub repositories');
-        }
-        
-        return await response.json();
+        const data = await handleApiResponse(response, url);
+        return data || [];
       } catch (error) {
         console.error('Error fetching GitHub repositories:', error);
         return [];
@@ -348,22 +428,20 @@ export const apiClient = {
   // API Key methods
   apiKeys: {
     list: async () => {
+      const url = `${BASE_URL}/api-keys`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        return [];
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/api-keys`, {
+        const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          return []; // Return empty array for graceful handling
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to fetch API keys');
-        }
-        
-        return await response.json();
+        const data = await handleApiResponse(response, url);
+        return data || [];
       } catch (error) {
         console.error('Error fetching API keys:', error);
         return [];
@@ -371,24 +449,21 @@ export const apiClient = {
     },
     
     generate: async (name, expiryDays) => {
+      const url = `${BASE_URL}/api-keys`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/api-keys`, {
+        const response = await fetch(url, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify({ name, expiryDays }),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          throw new Error('Authentication required');
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to generate API key');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error generating API key:', error);
         throw error;
@@ -396,23 +471,20 @@ export const apiClient = {
     },
     
     delete: async (keyId) => {
+      const url = `${BASE_URL}/api-keys/${keyId}`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('This endpoint is currently rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/api-keys/${keyId}`, {
+        const response = await fetch(url, {
           method: 'DELETE',
           headers: getAuthHeaders(),
         });
         
-        if (response.status === 401) {
-          console.warn('Authentication required. Redirecting to login...');
-          throw new Error('Authentication required');
-        }
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to delete API key');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error deleting API key:', error);
         throw error;
@@ -423,6 +495,9 @@ export const apiClient = {
   // Auth methods
   auth: {
     login: async () => {
+      // Clear any rate limiting before login
+      clearRateLimitTracking();
+      
       // Redirect to GitHub login
       window.location.href = `${BASE_URL}/auth/github/login`;
     },
@@ -433,22 +508,19 @@ export const apiClient = {
         throw new Error('No authentication token found');
       }
       
+      const url = `${BASE_URL}/auth/profile`;
+      
+      // Check if this endpoint is rate limited
+      if (isRateLimited(url)) {
+        throw new Error('Profile endpoint is rate limited. Please try again later.');
+      }
+      
       try {
-        const response = await fetch(`${BASE_URL}/auth/profile`, {
+        const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
         
-        if (!response.ok) {
-          // Clear token if invalid
-          if (response.status === 401) {
-            localStorage.removeItem('jwtToken');
-          }
-          
-          const error = await response.json();
-          throw new Error(error.message || 'Failed to fetch user profile');
-        }
-        
-        return await response.json();
+        return await handleApiResponse(response, url);
       } catch (error) {
         console.error('Error fetching user profile:', error);
         throw error;
@@ -462,19 +534,26 @@ export const apiClient = {
         return true;
       }
       
+      const url = `${BASE_URL}/auth/logout`;
+      
       try {
         // Call logout endpoint if authenticated
         if (token) {
           try {
-            await fetch(`${BASE_URL}/auth/logout`, {
+            const response = await fetch(url, {
               method: 'POST',
               headers: getAuthHeaders(),
             });
+            
+            await handleApiResponse(response, url);
           } catch (error) {
             // Ignore errors, still clear token locally
             console.warn('Error calling logout API:', error);
           }
         }
+        
+        // Clear any rate limiting on logout
+        clearRateLimitTracking();
         
         // Always clear the token
         localStorage.removeItem('jwtToken');
@@ -486,8 +565,14 @@ export const apiClient = {
         return true;
       }
     },
+    
+    // Method to clear rate limiting tracking
+    clearRateLimits: clearRateLimitTracking
   },
 };
+
+// Add a method to the window object to allow clearing rate limits from the console
+window.clearRateLimits = clearRateLimitTracking;
 
 // For backward compatibility with the supabase format
 export const backwardCompatClient = {

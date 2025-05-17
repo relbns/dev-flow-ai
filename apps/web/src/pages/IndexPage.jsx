@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/apiClient';
+import { useToast } from '@/hooks/use-toast';
 
 const IndexPage = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   useEffect(() => {
     // If authenticated, redirect to dashboard
@@ -16,6 +18,18 @@ const IndexPage = () => {
   }, [user, loading, navigate]);
 
   const handleLoginWithGitHub = () => {
+    // Clear any rate limits before login
+    try {
+      apiClient.auth.clearRateLimits();
+      toast({
+        title: 'Rate limits cleared',
+        description: 'Any previous rate limiting has been reset.',
+      });
+    } catch (error) {
+      console.error('Error clearing rate limits:', error);
+    }
+    
+    // Then proceed with login
     apiClient.auth.login();
   };
 
@@ -50,7 +64,35 @@ const IndexPage = () => {
         Sign in with GitHub
       </Button>
       
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl">
+      <div className="text-sm text-gray-500 mb-8">
+        <button 
+          onClick={() => {
+            apiClient.auth.clearRateLimits();
+            toast({
+              title: 'Rate limits cleared',
+              description: 'Any previous rate limiting has been reset.',
+            });
+          }}
+          className="text-blue-500 hover:underline"
+        >
+          Clear rate limits
+        </button>
+        {" | "}
+        <button 
+          onClick={() => {
+            localStorage.clear();
+            toast({
+              title: 'Storage cleared',
+              description: 'Local storage has been cleared.',
+            });
+          }}
+          className="text-blue-500 hover:underline"
+        >
+          Clear all storage
+        </button>
+      </div>
+      
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl">
         <div className="p-6 border rounded-lg shadow-sm">
           <h3 className="text-xl font-semibold mb-3">GitHub Integration</h3>
           <p>Connect your GitHub repositories, create tasks from issues, and track progress directly.</p>

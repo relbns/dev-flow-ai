@@ -27,14 +27,51 @@ app.use(corsMiddleware());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Rate limiting
-const limiter = rateLimit({
-    windowMs: process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000, // 15 minutes by default
-    max: process.env.RATE_LIMIT_MAX || 100, // limit each IP to 100 requests per windowMs
+// More permissive rate limiting for development
+// In production, these values should be lower
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
+// GitHub rate limiter (much more permissive for development)
+const githubRateLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: isDevelopment ? 60 : 15, // 60 requests per minute in development, 15 in production
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    message: 'Too many requests to GitHub endpoints, please try again after a minute',
+    handler: (req, res, next, options) => {
+        console.log(`Rate limited request to ${req.originalUrl}`);
+        res.status(options.statusCode).json({
+            error: options.message,
+            retryAfter: Math.ceil(options.windowMs / 1000)
+        });
+    },
+    // Skip rate limiting for certain endpoints in development
+    skip: (req, res) => isDevelopment && (
+        req.originalUrl.includes('/auth/profile') || // Skip profile checks
+        req.originalUrl.includes('/auth/github/login') // Skip login redirects
+    )
 });
-app.use(limiter);
+
+// Only apply GitHub rate limiter in production
+if (!isDevelopment) {
+    app.use('/api/github', githubRateLimiter);
+}
+
+// Much more permissive general rate limiting
+const generalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: isDevelopment ? 1000 : 100, // 1000 requests in development, 100 in production
+    standardHeaders: true,
+    legacyHeaders: false,
+    // Skip rate limiting for auth endpoints in development
+    skip: (req, res) => isDevelopment && (
+        req.originalUrl.includes('/auth/') ||
+        req.originalUrl === '/api/health'
+    )
+});
+
+// Apply general rate limiter
+app.use(generalLimiter);
 
 // Add basic health check endpoint
 app.get('/health', (req, res) => {
