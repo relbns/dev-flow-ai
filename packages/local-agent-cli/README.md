@@ -1,132 +1,122 @@
-# DevFlow AI - Local Agent CLI
+# DevFlow AI Local Agent CLI
 
-The DevFlow AI Local Agent CLI (`devflow-local-agent`) is a command-line tool that runs on the user's machine. It provides secure, sandboxed access to the local file system and Git operations. This agent can be interacted with in two ways:
+The DevFlow AI Local Agent CLI allows you to interact with your local filesystem and git repository from the DevFlow AI system. It provides a secure way for Claude and other AI assistants to read and write files within a specified root directory.
 
-1.  **HTTP Server Mode:** For direct access, testing, or integration with local scripts/tools via HTTP requests.
-2.  **Stdio MCP Mode:** For integration with AI agent platforms (like Claude Desktop or Cline) that use the Model Context Protocol (MCP) over standard input/output.
+## Installation
 
-## Features
+```bash
+npm install -g @dev-flow-ai/local-agent-cli
+```
 
-*   **File System Access:**
-    *   Read file content (`get_local_file_content`)
-    *   Write file content (`write_local_file_content`)
-    *   List files and directories (`list_local_files`)
-*   **Git Operations:**
-    *   Execute common Git commands (`execute_git_command` for status, log, add, commit, checkout, push, pull, branch)
-*   **Security:**
-    *   API Key authentication for all operations.
-    *   Project root sandboxing: All operations are confined to a specified project root directory.
-*   **Dual Mode Operation:**
-    *   Runs as an HTTP server for direct access.
-    *   Runs as an stdio-based MCP server for AI agent integration.
+Or use it directly from your project:
 
-## Installation & Configuration
+```bash
+npx devflow-local-agent
+```
 
-The Local Agent CLI is part of the DevFlow AI monorepo and is typically run from within the `packages/local-agent-cli` directory.
+## Quick Start
 
-### Configuration (`configure` command)
+Simply run the agent in your project directory:
 
-Run `devflow-local-agent configure` to set up default values for:
-*   **API Key:** This key is used for authenticating clients *to* this Local Agent (both HTTP and Stdio MCP modes) and also for authenticating this Local Agent *to* the remote Supabase MCP Gateway if you use remote tools.
-*   **Default Port:** The port number the HTTP server will listen on (e.g., `52173`).
-*   **Default Project Root Path:** This is a crucial setting for defining the primary directory for local operations.
-    *   **What it's for:** When the Local Agent performs actions like reading or writing files, this path serves as the top-level directory. All file operations are confined within this root, acting as a security sandbox.
-    *   **"Absolute path":** You should provide the full path from your filesystem's root (e.g., `/Users/yourname/myproject` on macOS/Linux or `C:\Users\yourname\myproject` on Windows).
-    *   **"Leave empty for CWD":** CWD means "Current Working Directory".
-        *   If you leave this field empty during `configure`, the configuration effectively stores an instruction to "use CWD".
-        *   Then, when you later run `devflow-local-agent start-server` (or just `devflow-local-agent`), if no other project root is specified via command-line options or environment variables, the agent will use the directory *from which you are currently running that `devflow-local-agent start-server` command* as its operational project root.
-        *   **In essence:** Leaving it empty during `configure` makes the project root dynamic, determined by where you start the agent's server. Providing an absolute path during `configure` makes it fixed, unless overridden at startup.
-    *   This configured path (or the CWD behavior) is the default for the HTTP server mode if not overridden by command-line options or environment variables at startup. For Stdio MCP mode, the `projectRoot` is typically provided with each tool call.
+```bash
+cd /your/project/directory
+npx devflow-local-agent
+```
 
-These values are saved to a local configuration file (e.g., `~/.config/devflow-local-agent/config.json` on Linux, `~/Library/Application Support/devflow-local-agent/config.json` on macOS).
-
-Configuration can also be provided via environment variables or command-line options, which override saved defaults.
-
-*   `DEVFLOW_LOCAL_AGENT_API_KEY` or `--api-key <key>`
-*   `DEVFLOW_LOCAL_AGENT_PORT` or `--port <port_number>` (HTTP mode)
-*   `DEVFLOW_LOCAL_AGENT_PROJECT_ROOT` or `--root <path>` (HTTP mode)
+This will:
+1. Start the agent in stdio mode (for Claude)
+2. Use your current directory as the project root
+3. Auto-generate an API key if not configured
 
 ## Usage
 
-### 1. HTTP Server Mode
+The agent has two main modes:
 
-This is the default mode. It starts an HTTP server allowing tools to be called via POST requests to `/mcp/:toolName`.
+### Stdio Mode (Default - for Claude)
 
-**Start the server:**
 ```bash
-# From packages/local-agent-cli directory
-npm start
+npx devflow-local-agent
 # or
-node index.js start-server --api-key YOUR_API_KEY --root /path/to/your/project
+npx devflow-local-agent start
 ```
 
-The server will start (default: `http://localhost:52173`). All requests to `/mcp/*` endpoints require an `X-DevFlow-API-Key` header.
+This mode is used when interacting with Claude or other AI assistants that support the Model Context Protocol (MCP).
 
-**Example HTTP Tool Call (curl):**
+### HTTP Server Mode
+
 ```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -H "X-DevFlow-API-Key: YOUR_API_KEY" \
-  -d '{"filePath": "README.md"}' \
-  http://localhost:52173/mcp/get_local_file_content
+npx devflow-local-agent start-server
 ```
-In HTTP mode, the `projectRoot` for operations is determined by the `--root` option or `DEVFLOW_LOCAL_AGENT_PROJECT_ROOT` environment variable used when starting the server.
 
-### 2. Stdio MCP Mode
+This starts an HTTP server that can be used by web applications to interact with your local filesystem.
 
-This mode is for integration with MCP hosts like Claude Desktop. The agent communicates over standard input/output.
+## Commands
 
-**Start in Stdio MCP Mode:**
+- `npx devflow-local-agent` - Start the agent in stdio mode (default)
+- `npx devflow-local-agent start-server` - Start an HTTP server
+- `npx devflow-local-agent configure` - Configure the agent settings
+- `npx devflow-local-agent status` - Check if an agent is running
+- `npx devflow-local-agent stop` - Stop a running agent
+- `npx devflow-local-agent switch-root [path]` - Change the root directory
+
+## Configuration
+
+To configure the agent, run:
+
 ```bash
-# From packages/local-agent-cli directory
-node index.js mcp-stdio
+npx devflow-local-agent configure
 ```
 
-**Environment Variables for Stdio MCP Mode (set by MCP Host):**
-*   `DEVFLOW_API_KEY`: (Required) The API key for authentication.
-*   `DEVFLOW_MAX_ROOT`: (Optional) An absolute path that acts as an ultimate sandbox. If set, all `projectRoot` arguments in tool calls must be within this directory.
+This will prompt you for:
+- API Key (auto-generated if not provided)
+- Server port (default: 52173)
+- Project root path (default: current directory)
+- Backend API URL (default: http://localhost:3000/api)
 
-**Tool Calls in Stdio MCP Mode:**
-The MCP host (e.g., Claude Desktop) will send JSON-RPC messages over stdin to call tools. Each tool call **must** include a `projectRoot` argument specifying the absolute path for the operation's context.
+## Singleton Behavior
 
-**Example Tool Definition (get_local_file_content):**
-```json
-{
-  "name": "get_local_file_content",
-  "description": "Reads the content of a file...",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "projectRoot": { "type": "string", "description": "Absolute path to the project root directory." },
-      "filePath": { "type": "string", "description": "Path to the file, relative to projectRoot." }
-    },
-    "required": ["projectRoot", "filePath"]
-  }
-}
-```
-The agent will use the `projectRoot` from the tool call arguments to perform its sandboxed operations.
+The DevFlow AI Local Agent is designed to run as a singleton - only one instance can run at a time. If you try to start a second instance, you'll be given options to:
 
-## Available Tools (for both modes)
+1. Use the existing agent
+2. Switch the root directory
+3. Stop the existing agent and start a new one
 
-The underlying utility functions are shared. The main difference is how `projectRoot` is determined:
-*   **HTTP Mode:** `projectRoot` is fixed at server startup.
-*   **Stdio MCP Mode:** `projectRoot` is passed dynamically with each tool call.
+## Environment Variables
 
-1.  **`get_local_file_content`**
-    *   Description: Reads file content.
-    *   HTTP Args: `{ "filePath": "path/to/file.txt" }`
-    *   Stdio MCP Args: `{ "projectRoot": "/abs/path/to/project", "filePath": "path/to/file.txt" }`
-2.  **`write_local_file_content`**
-    *   Description: Writes content to a file.
-    *   HTTP Args: `{ "filePath": "path/to/file.txt", "content": "Hello" }`
-    *   Stdio MCP Args: `{ "projectRoot": "/abs/path/to/project", "filePath": "path/to/file.txt", "content": "Hello" }`
-3.  **`list_local_files`**
-    *   Description: Lists files and directories.
-    *   HTTP Args: `{ "directoryPath": "path/to/dir", "recursive": false, "ignore": [".git"] }`
-    *   Stdio MCP Args: `{ "projectRoot": "/abs/path/to/project", "directoryPath": "path/to/dir", ... }`
-4.  **`execute_git_command`**
-    *   Description: Executes a Git command.
-    *   HTTP Args: `{ "command_args": ["status"] }` (runs in server's `currentProjectRoot`)
-    *   Stdio MCP Args: `{ "projectRoot": "/abs/path/to/project", "executionCwd": ".", "command_args": ["status"] }`
+The agent respects the following environment variables:
 
-Refer to `index.js` for detailed input schemas for Stdio MCP mode.
+- `DEVFLOW_MAX_ROOT` - The project root directory
+- `DEVFLOW_API_KEY` - The API key for authentication
+- `DEVFLOW_LOCAL_AGENT_PORT` - The port for the HTTP server
+- `DEVFLOW_LOCAL_AGENT_PROJECT_ROOT` - The project root directory
+
+## Available Tools
+
+The agent provides the following tools:
+
+### Local Tools
+
+- `get_local_file_content` - Read a file from the local filesystem
+- `write_local_file_content` - Write a file to the local filesystem
+- `list_local_files` - List files and directories
+- `execute_git_command` - Execute a Git command
+
+### Remote Tools
+
+- `remote_list_projects` - List projects from the DevFlow AI backend
+- `remote_get_project_details` - Get project details
+- `remote_list_tasks` - List tasks for a project
+- `remote_get_task_details` - Get task details
+- `remote_create_project` - Create a new project
+- `remote_create_task` - Create a new task
+- `remote_update_task_status` - Update a task's status
+- `remote_add_comment_to_task` - Add a comment to a task
+
+## Security
+
+The agent is designed with security in mind:
+
+- File operations are restricted to the specified project root
+- Git commands are limited to safe operations
+- API key authentication for HTTP server mode
+- Configurable permissions for remote access
