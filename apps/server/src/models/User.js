@@ -5,7 +5,7 @@ const userSchema = new mongoose.Schema({
     githubId: {
         type: String,
         required: true,
-        unique: true
+        unique: true  // This already creates a unique index
     },
     username: {
         type: String,
@@ -34,8 +34,7 @@ const userSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Indexes for performance
-userSchema.index({ githubId: 1 });
+// Indexes for performance - removed githubId as it's already indexed as unique
 userSchema.index({ username: 1 });
 userSchema.index({ email: 1 });
 

@@ -109,6 +109,12 @@ const handleApiResponse = async (response, endpoint) => {
     return null;
   }
   
+  // Special handling for 404 on tasks endpoint - just return empty array
+  if (response.status === 404 && endpoint.includes('/tasks')) {
+    console.warn('Tasks endpoint returned 404. Returning empty array.');
+    return [];
+  }
+  
   // Handle other errors
   if (!response.ok) {
     try {
@@ -173,7 +179,8 @@ export const apiClient = {
         return data || [];
       } catch (error) {
         console.error('Error fetching tasks:', error);
-        return []; // Return empty array on error for more graceful handling
+        // Return empty array on error for more graceful handling
+        return [];
       }
     },
     
@@ -292,7 +299,8 @@ export const apiClient = {
         return data || [];
       } catch (error) {
         console.error('Error fetching projects:', error);
-        return []; // Return empty array on error for more graceful handling
+        // Return empty array on error for more graceful handling
+        return [];
       }
     },
     

@@ -3,6 +3,86 @@ import Task from '../models/Task.js';
 import Project from '../models/Project.js';
 import { createGithubIssue } from './githubService.js';
 
+// Get tasks for a user (personal or organization)
+// This is the new function we're adding
+export const getUserTasks = async (userId, filters = {}) => {
+    try {
+        // First get projects the user has access to
+        const projectsQuery = {
+            $or: [
+                { owner: userId },
+                { 'members.user': userId }
+            ]
+        };
+        
+        // If org_id is specified, filter projects by organization
+        if (filters.org_id && filters.org_id !== 'personal') {
+            projectsQuery.organizationId = filters.org_id;
+        } else if (filters.org_id === 'personal') {
+            projectsQuery.organizationId = { $exists: false }; // Only personal projects
+        }
+        
+        const accessibleProjects = await Project.find(projectsQuery, '_id');
+        const projectIds = accessibleProjects.map(p => p._id);
+        
+        if (projectIds.length === 0) {
+            return []; // No projects, so no tasks
+        }
+        
+        // Build task query
+        const query = { project: { $in: projectIds } };
+        
+        // Apply filters
+        if (filters.status) {
+            query.status = filters.status;
+        }
+        
+        if (filters.priority) {
+            query.priority = filters.priority;
+        }
+        
+        if (filters.assignee === 'me') {
+            query.assignee = userId;
+        } else if (filters.assignee) {
+            query.assignee = filters.assignee === 'unassigned' ? null : filters.assignee;
+        }
+        
+        if (filters.tags && filters.tags.length > 0) {
+            query.tags = { $in: filters.tags };
+        }
+        
+        // Pagination
+        const page = parseInt(filters.page) || 1;
+        const limit = parseInt(filters.limit) || 50;
+        const skip = (page - 1) * limit;
+        
+        // Sort options
+        const sortOptions = {};
+        if (filters.sortBy) {
+            sortOptions[filters.sortBy] = filters.sortOrder === 'asc' ? 1 : -1;
+        } else {
+            // Default sort by updatedAt
+            sortOptions.updatedAt = -1;
+        }
+        
+        // Execute query
+        const tasks = await Task.find(query)
+            .populate('project', 'name')
+            .populate('creator', 'username displayName avatarUrl')
+            .populate('assignee', 'username displayName avatarUrl')
+            .sort(sortOptions)
+            .skip(skip)
+            .limit(limit);
+        
+        // For simple API compatibility, don't send pagination info
+        // Just return the tasks array
+        return tasks;
+    } catch (error) {
+        console.error('Error getting user tasks:', error);
+        throw error;
+    }
+};
+
 // Create a new task
 export const createTask = async (userId, projectId, taskData) => {
     try {

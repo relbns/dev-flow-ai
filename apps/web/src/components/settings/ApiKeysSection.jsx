@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabaseClient'; // Using @ alias
+import { apiClient } from '@/lib/apiClient'; // Changed from supabase to apiClient
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -8,8 +8,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/use-toast'; // Or your preferred toast library
 import { Copy, Trash2 } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth'; // Import useAuth to check authentication state
 
 const ApiKeysSection = () => {
+  const { user } = useAuth(); // Use the auth context
   const [apiKeys, setApiKeys] = useState([]);
   const [isLoadingKeys, setIsLoadingKeys] = useState(true);
   const [newApiKeyName, setNewApiKeyName] = useState('');
@@ -19,20 +21,17 @@ const ApiKeysSection = () => {
   const [isCopied, setIsCopied] = useState(false);
 
   const fetchApiKeys = useCallback(async () => {
+    if (!user) {
+      setError('Not authenticated');
+      setIsLoadingKeys(false);
+      return;
+    }
+    
     setIsLoadingKeys(true);
     setError('');
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session) {
-        throw new Error(sessionError?.message || 'User not authenticated.');
-      }
-
-      const { data, error: fetchError } = await supabase.functions.invoke('list-api-keys', {
-        method: 'GET',
-        // JWT is automatically included by supabase-js client if user is logged in
-      });
-
-      if (fetchError) throw fetchError;
+      // Use the apiClient directly
+      const data = await apiClient.apiKeys.list();
       setApiKeys(data || []);
     } catch (err) {
       console.error("Error fetching API keys:", err);
@@ -41,33 +40,24 @@ const ApiKeysSection = () => {
     } finally {
       setIsLoadingKeys(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     fetchApiKeys();
   }, [fetchApiKeys]);
 
   const handleGenerateKey = async () => {
+    if (!user) {
+      setError('Not authenticated');
+      return;
+    }
+    
     setIsLoadingGenerate(true);
     setError('');
     setGeneratedApiKey(null);
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session) {
-        throw new Error(sessionError?.message || 'User not authenticated.');
-      }
-      
-      const payload = {};
-      if (newApiKeyName.trim() !== '') {
-        payload.name = newApiKeyName.trim();
-      }
-
-      const { data, error: generateError } = await supabase.functions.invoke('generate-api-key', {
-        method: 'POST',
-        body: payload,
-      });
-
-      if (generateError) throw generateError;
+      // Use apiClient to generate a key
+      const data = await apiClient.apiKeys.generate(newApiKeyName.trim() || undefined);
       
       setGeneratedApiKey(data.apiKey);
       setNewApiKeyName(''); // Clear input
@@ -83,19 +73,15 @@ const ApiKeysSection = () => {
   };
 
   const handleRevokeKey = async (apiKeyId) => {
+    if (!user) {
+      setError('Not authenticated');
+      return;
+    }
+    
     setError('');
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session) {
-        throw new Error(sessionError?.message || 'User not authenticated.');
-      }
-
-      const { error: deleteError } = await supabase.functions.invoke('delete-api-key', {
-        method: 'POST',
-        body: { api_key_id: apiKeyId },
-      });
-
-      if (deleteError) throw deleteError;
+      // Use apiClient to delete a key
+      await apiClient.apiKeys.delete(apiKeyId);
       
       fetchApiKeys(); // Refresh list
       toast({ title: "API Key Revoked", description: "The API key has been successfully revoked." });

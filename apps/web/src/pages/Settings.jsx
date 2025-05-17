@@ -1,6 +1,4 @@
-
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient'; // Using @ alias
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -11,10 +9,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import ThemeToggle from '@/components/ThemeToggle';
 import ApiKeysSection from '@/components/settings/ApiKeysSection'; 
-import { Github, User, Bell, Shield, Moon, Sun, Edit3 } from 'lucide-react'; // Added Edit3 for an icon
+import { Github, User, Bell, Shield, Moon, Sun, Edit3 } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth'; // Import useAuth
 
 const Settings = () => {
-  const [sessionUser, setSessionUser] = useState(null);
+  const { user } = useAuth(); // Use auth context
   const [profileData, setProfileData] = useState({
     avatarUrl: '',
     fallbackName: 'N/A',
@@ -25,21 +24,18 @@ const Settings = () => {
 
   useEffect(() => {
     const fetchSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setSessionUser(session.user);
-        const meta = session.user.user_metadata;
+      if (user) {
         setProfileData({
-          avatarUrl: meta.avatar_url || '',
-          fallbackName: (meta.full_name || meta.user_name || 'N A').split(' ').map(n => n[0]).join('').toUpperCase(),
-          fullName: meta.full_name || meta.user_name || 'N/A',
-          email: session.user.email || 'N/A', // Main email from auth.users
-          gitHubUsername: meta.user_name || 'N/A',
+          avatarUrl: user.avatarUrl || '',
+          fallbackName: (user.displayName || user.username || 'N A').split(' ').map(n => n[0]).join('').toUpperCase(),
+          fullName: user.displayName || user.username || 'N/A',
+          email: user.email || 'N/A',
+          gitHubUsername: user.username || 'N/A',
         });
       }
     };
     fetchSession();
-  }, []);
+  }, [user]);
 
   return (
     <div className="flex flex-col h-screen">
@@ -106,7 +102,6 @@ const Settings = () => {
                       </div>
                     </div>
                   </div>
-                  {/* "Save Changes" and "Cancel" buttons removed as fields are read-only */}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -293,12 +288,9 @@ const Settings = () => {
                       </div>
                       <Button>Connect</Button>
                     </div>
-                    
-                    {/* Additional integrations would go here */}
                   </div>
                   
                   <div className="pb-2 pt-4 border-t">
-                    {/* Replace placeholder with the actual ApiKeysSection component */}
                     <ApiKeysSection />
                   </div>
                 </CardContent>

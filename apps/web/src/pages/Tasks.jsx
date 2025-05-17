@@ -9,77 +9,68 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  // DropdownMenuSeparator, // Not used for status-only filter
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient'; // Use apiClient instead of supabase
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow, parseISO } from 'date-fns';
+import { useAuth } from '@/hooks/useAuth'; // Import useAuth
 
 const Tasks = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth(); // Use auth context
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  // Priority filter removed for V1 as 'priority' is not in tasks table yet
 
   const [allTasks, setAllTasks] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchUserTasks = async () => {
-      setLoading(true);
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session?.user) {
-        toast({ title: "Error", description: "User not authenticated. Please log in.", variant: "destructive" });
-        setAllTasks([]); // Clear tasks if not authenticated
+      if (!user) {
+        console.log("No authenticated user, skipping task fetch");
+        setAllTasks([]);
         setLoading(false);
-        navigate('/'); // Redirect to home or login page
         return;
       }
-      const userId = session.user.id;
 
+      setLoading(true);
       try {
-        // Fetch tasks from projects owned by the user
-        const { data, error } = await supabase
-          .from('tasks')
-          .select('*, projects!inner(user_id, name)') // !inner join to ensure tasks belong to a project
-          .eq('projects.user_id', userId) // Filter by projects owned by the current user
-          .order('created_at', { ascending: false });
+        // Use apiClient to fetch tasks
+        const tasks = await apiClient.tasks.list();
 
-        if (error) throw error;
-
-        const formattedTasks = data.map(task => ({
+        // Format tasks for display
+        const formattedTasks = (tasks || []).map(task => ({
           ...task,
-          projectName: task.projects?.name || 'N/A',
-          // Add placeholders for TaskCard compatibility
-          assignee: { name: 'Unassigned', avatar: '' }, 
-          comments: 0, 
-          priority: 'medium', // Placeholder
-          // Use updated_at for dueDate display as a proxy
-          dueDate: task.updated_at ? formatDistanceToNow(parseISO(task.updated_at), { addSuffix: true }) : 'N/A' 
+          projectName: task.project?.name || 'N/A',
+          assignee: { name: task.assignee?.displayName || 'Unassigned', avatar: task.assignee?.avatarUrl || '' }, 
+          comments: task.comments?.length || 0, 
+          priority: task.priority || 'medium',
+          dueDate: task.dueDate ? formatDistanceToNow(parseISO(task.dueDate), { addSuffix: true }) : 
+                  (task.updated_at ? formatDistanceToNow(parseISO(task.updated_at), { addSuffix: true }) : 'N/A')
         }));
-        setAllTasks(formattedTasks || []);
+        
+        setAllTasks(formattedTasks);
       } catch (err) {
         console.error('Error fetching tasks:', err);
-        toast({ title: "Error Fetching Tasks", description: err.message, variant: "destructive" });
+        toast({ title: "Error Fetching Tasks", description: "Could not fetch tasks at this time.", variant: "destructive" });
         setAllTasks([]);
       } finally {
         setLoading(false);
       }
     };
+    
     fetchUserTasks();
-  }, [toast, navigate]); // Added navigate to dependency array
+  }, [toast, navigate, user]); // Added user as dependency
 
   const handleTaskClick = (taskId) => {
-    // Navigate to TaskDetail page using only the taskId.
-    // TaskDetailPage will fetch all necessary details, including project_id.
     navigate(`/tasks/${taskId}`);
   };
 
   const filteredTasks = allTasks.filter(task => {
     const searchLower = searchQuery.toLowerCase();
-    const matchesSearch = task.title.toLowerCase().includes(searchLower) ||
+    const matchesSearch = (task.title?.toLowerCase().includes(searchLower)) ||
       (task.description && task.description.toLowerCase().includes(searchLower)) ||
       (task.projectName && task.projectName.toLowerCase().includes(searchLower));
     
@@ -92,7 +83,6 @@ const Tasks = () => {
         } else if (statusFilter === 'completed') {
             matchesStatus = task.status === 'Done' || task.status === 'In Review';
         } 
-        // Removed direct task.status === statusFilter as it might not match grouped categories
     }
     return matchesSearch && matchesStatus;
   });

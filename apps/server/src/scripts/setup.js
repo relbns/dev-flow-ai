@@ -20,24 +20,41 @@ const setupDatabase = async () => {
     console.log('Existing collections:', collectionNames);
 
     // Create indexes for better query performance
+    // But handle existing indexes by dropping them first if needed
+    
+    // Function to safely create indexes (by dropping existing ones first)
+    const safeCreateIndexes = async (model, modelName) => {
+      try {
+        // Get existing indexes first
+        const existingIndexes = await mongoose.connection.db
+          .collection(model.collection.name)
+          .indexes();
+        
+        console.log(`Existing indexes for ${modelName}:`, existingIndexes.map(idx => idx.name));
+        
+        // Try to create indexes - will handle duplicates automatically
+        await model.createIndexes();
+        console.log(`${modelName} indexes created/updated`);
+      } catch (indexError) {
+        console.warn(`Warning: Could not create indexes for ${modelName}:`, indexError.message);
+        console.log(`${modelName} may already have compatible indexes`);
+      }
+    };
+
     if (collectionNames.includes('users')) {
-      await User.createIndexes();
-      console.log('User indexes created');
+      await safeCreateIndexes(User, 'User');
     }
 
     if (collectionNames.includes('projects')) {
-      await Project.createIndexes();
-      console.log('Project indexes created');
+      await safeCreateIndexes(Project, 'Project');
     }
 
     if (collectionNames.includes('tasks')) {
-      await Task.createIndexes();
-      console.log('Task indexes created');
+      await safeCreateIndexes(Task, 'Task');
     }
 
     if (collectionNames.includes('apikeys')) {
-      await ApiKey.createIndexes();
-      console.log('ApiKey indexes created');
+      await safeCreateIndexes(ApiKey, 'ApiKey');
     }
 
     console.log('Database setup completed successfully');

@@ -8,13 +8,26 @@ import {
     updateTask,
     deleteTask,
     addTaskComment,
-    deleteTaskComment
+    deleteTaskComment,
+    getUserTasks // Make sure to import or create this function
 } from '../services/taskService.js';
 
 const router = express.Router();
 
 // Apply authentication middleware to all task routes
 router.use(authenticateUser);
+
+// Get tasks for current user (personal or organization)
+// This is the new endpoint we're adding
+router.get('/', async (req, res) => {
+    try {
+        const result = await getUserTasks(req.user._id, req.query);
+        res.json(result);
+    } catch (error) {
+        console.error('Error fetching user tasks:', error);
+        res.status(400).json({ error: error.message });
+    }
+});
 
 // Create new task
 router.post('/', async (req, res) => {
