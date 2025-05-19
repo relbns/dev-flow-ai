@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import routes from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { corsMiddleware } from './middleware/corsMiddleware.js';
+import { connectToDatabase } from './utils/mongodb.js';
 
 dotenv.config();
 
@@ -92,14 +93,16 @@ app.use(errorHandler);
 // Connect to MongoDB and start server
 const startServer = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
+    // await mongoose.connect(process.env.MONGODB_URI); // using non serverless connection
+    await connectToDatabase();
     console.log('Connected to MongoDB');
     
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
-    });
+    // uncomment on non serverless connection
+    // app.listen(PORT, () => {
+    //   console.log(`Server running on port ${PORT}`);
+    //   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    //   console.log(`Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
+    // });
   } catch (err) {
     console.error('Failed to connect to MongoDB', err);
     process.exit(1);
