@@ -103,11 +103,29 @@ function listLocalFiles (directoryPath, recursive = false, projectRoot, ignorePa
 function executeGitCommandUtility (gitArgsArray, executionCwd, projectRoot) {
   const commandString = gitArgsArray.join(' ');
   const allowedCommandPatterns = [
-    /^status(?: -s)?$/, /^rev-parse --abbrev-ref HEAD$/, /^checkout -b [\w.-]+$/,
-    /^checkout [\w.-]+$/, /^add (?:[\w.-/]+|\.)$/, /^commit -m ".+"$/,
-    /^push(?: [\w.-]+ [\w.-]+)?$/, /^pull(?: [\w.-]+ [\w.-]+)?$/, /^branch$/,
-    /^log(?: -\d+)?(?: --oneline)?(?: --graph)?(?: --decorate)?(?: --all)?$/
-  ];
+    // Current allowed commands
+    /^status(?: -s)?$/,
+    /^rev-parse --abbrev-ref HEAD$/,
+    /^checkout -b [\w.-]+$/,
+    /^checkout [\w.-]+$/,
+    /^add (?:[\w.-/]+|\.)$/,
+    /^commit -m ".+"$/,
+    /^push(?: [\w.-]+ [\w.-]+)?$/,
+    /^pull(?: [\w.-]+ [\w.-]+)?$/,
+    /^branch$/,
+    /^log(?: -\d+)?(?: --oneline)?(?: --graph)?(?: --decorate)?(?: --all)?$/,
+
+    // Additional useful commands
+    /^grep(?: -[a-zA-Z0-9]+)* (?:--[a-zA-Z0-9-]+(?: [^\s]+)?)* .+/, // grep with options
+    /^diff(?: --name-only)?(?: --staged)?(?: [^\s]+)*$/, // diff with common options
+    /^show(?: [a-f0-9]{7,40})?$/, // show commit details
+    /^ls-files(?: --others)?(?: --modified)?(?: --exclude-standard)?$/, // list files
+    /^stash(?: list)?$/, // stash without destructive operations
+    /^config(?: --get)? [^\s]+$/, // safe config reads
+    /^remote -v$/, // list remotes
+    /^tag$/, // list tags
+    /^fetch(?: [^\s]+)?$/ // fetch updates
+  ]
 
   if (!allowedCommandPatterns.some(pattern => pattern.test(commandString))) {
     const err = new Error(`Command "git ${commandString}" is not allowed.`);
