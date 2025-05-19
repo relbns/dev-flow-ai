@@ -23,7 +23,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient'; // Import apiClient instead of supabase
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton
 import { format, parseISO, formatDistanceToNow } from 'date-fns'; // For date formatting
@@ -56,13 +56,8 @@ const TaskDetail = () => {
     setLoading(true);
     setError(null);
     try {
-      const { data, error: taskError } = await supabase
-        .from('tasks')
-        .select('*, projects(name), scoped_paths(name, path_in_repo), task_comments:task_comments_with_user_info(id, user_id, author_display_name, comment_text, created_at, user_profile_data)')
-        .eq('id', taskId)
-        .single();
-
-      if (taskError) throw taskError;
+      // Use apiClient instead of direct supabase calls
+      const data = await apiClient.tasks.getDetails(taskId);
 
       if (data) {
         const sortedComments = data.task_comments?.sort((a, b) => 
@@ -106,9 +101,14 @@ const TaskDetail = () => {
 
   useEffect(() => {
     const fetchCurrentUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setCurrentUser(session.user);
+      try {
+        // Use apiClient instead of supabase.auth.getSession()
+        const profile = await apiClient.auth.getProfile();
+        if (profile) {
+          setCurrentUser(profile);
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error);
       }
     };
     fetchCurrentUser();
@@ -159,11 +159,9 @@ const TaskDetail = () => {
   const handleStatusChange = async (newStatus) => {
     if (!taskData) return;
     try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({ status: newStatus, updated_at: new Date().toISOString() })
-        .eq('id', taskData.id);
-      if (error) throw error;
+      // Use apiClient instead of direct supabase call
+      await apiClient.tasks.updateStatus(taskData.id, { status: newStatus });
+      
       setTaskData(prev => ({ ...prev, status: newStatus, updated_at: new Date().toISOString() }));
       toast({ title: "Status Updated", description: `Task status changed to ${newStatus}` });
     } catch (err) {
@@ -172,7 +170,7 @@ const TaskDetail = () => {
     }
   };
   
-  const handleAddComment = async () => { // Made function async
+  const handleAddComment = async () => {
     if (!newComment.trim()) return;
     
     if (!taskData || !taskData.id) {
@@ -180,32 +178,19 @@ const TaskDetail = () => {
       return;
     }
 
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession(); // Added error handling for getSession
-    if (sessionError || !session?.user) {
-      toast({ title: "Error", description: "You must be logged in to comment.", variant: "destructive" });
-      return;
-    }
-
     try {
       const commentToInsert = {
         task_id: taskData.id,
         comment_text: newComment,
-        user_id: session.user.id,
-        author_display_name: session.user.email || session.user.id, // Fallback to user.id if email is null
       };
 
-      const { data: savedComment, error } = await supabase
-        .from('task_comments')
-        .insert(commentToInsert)
-        .select()
-        .single();
+      // Use apiClient instead of direct supabase call
+      const savedComment = await apiClient.tasks.addComment(taskData.id, commentToInsert);
       
-      if (error) throw error;
-
       // Construct a complete comment object for optimistic update
       const newCommentForUI = {
         ...savedComment,
-        user_profile_data: session.user.user_metadata // Add user metadata for immediate display
+        user_profile_data: currentUser?.user_metadata // Add user metadata for immediate display
       };
 
       setTaskData(prev => ({
@@ -216,7 +201,6 @@ const TaskDetail = () => {
       
       setNewComment('');
       toast({title: "Comment Added", description: "Your comment has been posted."});
-      // No need to call fetchTaskDetails() anymore for this specific case
       // Scroll to bottom after optimistic update
       // Need to wait for the DOM to update after setTaskData
       setTimeout(scrollToBottom, 0); 

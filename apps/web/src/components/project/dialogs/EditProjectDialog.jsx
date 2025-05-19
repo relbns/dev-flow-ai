@@ -1,6 +1,6 @@
 // src/components/project/dialogs/EditProjectDialog.jsx
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient';
 import {
   Dialog,
   DialogContent,
@@ -97,7 +97,7 @@ const EditProjectDialog = ({ open, onOpenChange, project, onSuccess, toast }) =>
       return;
     }
 
-    const payload = { projectId: project.id };
+    const payload = { };
     let hasChanges = false;
 
     if (projectForm.name !== initialProjectForm.name) {
@@ -135,15 +135,9 @@ const EditProjectDialog = ({ open, onOpenChange, project, onSuccess, toast }) =>
 
     try {
       setLoading(true);
-      const { data: updatedProject, error } = await supabase.functions.invoke(
-        'update-project',
-        {
-          method: 'PATCH',
-          body: payload,
-        }
-      );
-
-      if (error) throw error;
+      
+      // Use the apiClient instead of supabase.functions.invoke
+      const updatedProject = await apiClient.projects.update(project.id, payload);
 
       console.log('Project updated successfully:', updatedProject);
       toast({

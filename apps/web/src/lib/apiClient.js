@@ -1,3 +1,6 @@
+// apiClient.js
+import { normalizeIdFields } from './id-utils';
+
 // Helper function to clear rate limit tracker
 export const clearRateLimitTracking = () => {
   // Clear any stored rate limit information
@@ -5,7 +8,7 @@ export const clearRateLimitTracking = () => {
   console.log('Rate limit tracking has been cleared');
 };
 
-// apiClient.js - Error handling improvements for rate limiting
+// Error handling improvements for rate limiting
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 // Track rate limited endpoints to avoid repeated requests
@@ -129,9 +132,10 @@ const handleApiResponse = async (response, endpoint) => {
     }
   }
   
-  // Parse JSON response
+  // Parse JSON response and normalize MongoDB _id fields
   try {
-    return await response.json();
+    const data = await response.json();
+    return normalizeIdFields(data);
   } catch (e) {
     // Handle empty response
     if (response.status === 204) {
@@ -291,11 +295,13 @@ export const apiClient = {
       }
       
       try {
+        console.log('Fetching projects from:', url);
         const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
         
         const data = await handleApiResponse(response, url);
+        console.log('Projects data received:', data);
         return data || [];
       } catch (error) {
         console.error('Error fetching projects:', error);
@@ -305,7 +311,13 @@ export const apiClient = {
     },
     
     getDetails: async (projectId) => {
+      if (!projectId) {
+        console.error('No project ID provided to getDetails');
+        throw new Error('Project ID is required');
+      }
+      
       const url = `${BASE_URL}/projects/${projectId}`;
+      console.log('Fetching project details from:', url);
       
       // Check if this endpoint is rate limited
       if (isRateLimited(url)) {
@@ -316,6 +328,11 @@ export const apiClient = {
         const response = await fetch(url, {
           headers: getAuthHeaders(),
         });
+        
+        if (response.status === 404) {
+          console.error(`Project with ID ${projectId} not found`);
+          throw new Error('Project not found');
+        }
         
         return await handleApiResponse(response, url);
       } catch (error) {
@@ -347,6 +364,11 @@ export const apiClient = {
     },
     
     update: async (projectId, projectData) => {
+      if (!projectId) {
+        console.error('No project ID provided to update');
+        throw new Error('Project ID is required');
+      }
+      
       const url = `${BASE_URL}/projects/${projectId}`;
       
       // Check if this endpoint is rate limited

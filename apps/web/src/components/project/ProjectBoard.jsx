@@ -1,11 +1,31 @@
 // src/components/project/ProjectBoard.jsx
 import React from 'react';
 import { DragDropContext, Droppable } from '@hello-pangea/dnd';
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient';
 import { cn } from '@/lib/utils';
 import TaskColumn from '../tasks/TaskColumn';
+import { AlertCircle } from 'lucide-react';
 
 const ProjectBoard = ({ projectTasks, projectId, onTaskClick, fetchTasksForProject, toast }) => {
+  // Validate inputs to prevent errors
+  if (!projectId) {
+    return (
+      <div className="p-6 border rounded-lg bg-destructive/10 text-destructive">
+        <div className="flex items-center">
+          <AlertCircle className="h-5 w-5 mr-2" />
+          <span>Cannot display task board: Project ID is missing.</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Ensure projectTasks is properly structured
+  const validProjectTasks = {
+    notStarted: Array.isArray(projectTasks?.notStarted) ? projectTasks.notStarted : [],
+    inProgress: Array.isArray(projectTasks?.inProgress) ? projectTasks.inProgress : [],
+    completed: Array.isArray(projectTasks?.completed) ? projectTasks.completed : [],
+  };
+
   const handleDragEnd = (result) => {
     const { source, destination, draggableId } = result;
     if (!destination) return;
@@ -19,7 +39,7 @@ const ProjectBoard = ({ projectTasks, projectId, onTaskClick, fetchTasksForProje
     const destColumnKey = destination.droppableId;
 
     let newStatus =
-      projectTasks[destColumnKey][0]?.status ||
+      validProjectTasks[destColumnKey][0]?.status ||
       (destColumnKey === 'notStarted'
         ? 'To Do'
         : destColumnKey === 'inProgress'
@@ -28,15 +48,18 @@ const ProjectBoard = ({ projectTasks, projectId, onTaskClick, fetchTasksForProje
         ? 'Done'
         : 'Backlog');
 
-    const taskToMove = projectTasks[sourceColumnKey].find(
+    const taskToMove = validProjectTasks[sourceColumnKey].find(
       (t) => t.id === draggableId
     );
-    if (!taskToMove) return;
+    if (!taskToMove) {
+      console.warn('Task not found during drag operation:', draggableId);
+      return;
+    }
 
-    const newSourceTasks = projectTasks[sourceColumnKey].filter(
+    const newSourceTasks = validProjectTasks[sourceColumnKey].filter(
       (t) => t.id !== draggableId
     );
-    const newDestTasks = [...projectTasks[destColumnKey]];
+    const newDestTasks = [...validProjectTasks[destColumnKey]];
     newDestTasks.splice(destination.index, 0, {
       ...taskToMove,
       status: newStatus,
@@ -44,30 +67,39 @@ const ProjectBoard = ({ projectTasks, projectId, onTaskClick, fetchTasksForProje
 
     // Optimistically update UI
     const newProjectTasks = {
-      ...projectTasks,
+      ...validProjectTasks,
       [sourceColumnKey]: newSourceTasks,
       [destColumnKey]: newDestTasks,
     };
 
-    // Update task status in database
-    supabase
-      .from('tasks')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', draggableId)
-      .then(({ error: updateError }) => {
-        if (updateError) {
-          toast({
-            title: 'Error updating task status',
-            description: updateError.message,
-            variant: 'destructive',
-          });
-          // Revert optimistic update on error
+    // Ensure we have a valid task ID before making the API call
+    if (!draggableId) {
+      toast({
+        title: 'Error updating task',
+        description: 'Task ID is missing or invalid.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Update task status in database using apiClient
+    apiClient.tasks.updateStatus(draggableId, { status: newStatus })
+      .then(() => {
+        toast({
+          title: 'Task Status Updated',
+          description: `"${taskToMove.title}" moved to ${newStatus}`,
+        });
+      })
+      .catch(error => {
+        console.error('Error updating task status:', error);
+        toast({
+          title: 'Error updating task status',
+          description: error.message,
+          variant: 'destructive',
+        });
+        // Revert optimistic update on error by refetching tasks
+        if (projectId) {
           fetchTasksForProject(projectId);
-        } else {
-          toast({
-            title: 'Task Status Updated',
-            description: `"${taskToMove.title}" moved to ${newStatus}`,
-          });
         }
       });
   };
@@ -95,11 +127,11 @@ const ProjectBoard = ({ projectTasks, projectId, onTaskClick, fetchTasksForProje
                       : 'COMPLETED'}
                   </span>
                   <span className="bg-secondary px-2 py-0.5 rounded-md">
-                    {projectTasks[columnId].length}
+                    {validProjectTasks[columnId].length}
                   </span>
                 </h3>
                 <TaskColumn 
-                  tasks={projectTasks[columnId]} 
+                  tasks={validProjectTasks[columnId]} 
                   onTaskClick={onTaskClick} 
                 />
                 {provided.placeholder}

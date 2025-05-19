@@ -1,6 +1,6 @@
 // src/hooks/project/useProjectGithub.js
 import { useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient';
 
 export const useProjectGithub = (toast) => {
   const [githubOrgRepos, setGithubOrgRepos] = useState([]);
@@ -20,39 +20,9 @@ export const useProjectGithub = (toast) => {
       setLoadingRepos(true);
       
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        
-        if (!session?.access_token) {
-          throw new Error('User not authenticated or access token missing.');
-        }
-
-        const functionUrl = `${supabase.functions.getFunctionsUrl()}/list-github-org-projects?orgName=${encodeURIComponent(
-          orgName
-        )}`;
-
-        const response = await fetch(functionUrl, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          const errorData = await response
-            .json()
-            .catch(() => ({
-              error: `Failed to fetch repos: ${response.statusText}`,
-            }));
-          throw new Error(
-            errorData.error || `Failed to fetch repos: ${response.statusText}`
-          );
-        }
-
-        const data = await response.json();
-        setGithubOrgRepos(data || []);
+        // Use the apiClient instead of direct supabase calls
+        const repositories = await apiClient.github.getRepositories(orgName);
+        setGithubOrgRepos(repositories || []);
       } catch (error) {
         console.error(
           'Error fetching GitHub org repos for project edit:',

@@ -1,6 +1,6 @@
 // src/components/project/dialogs/NewTaskDialog.jsx
 import React, { useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient';
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,7 @@ const NewTaskDialog = ({ open, onOpenChange, project, fetchTasksForProject, toas
   };
   
   const [newTaskForm, setNewTaskForm] = useState(initialTaskFormState);
+  const [loading, setLoading] = useState(false);
 
   const handleNewTask = async (e) => {
     e.preventDefault();
@@ -49,6 +50,7 @@ const NewTaskDialog = ({ open, onOpenChange, project, fetchTasksForProject, toas
       return;
     }
     try {
+      setLoading(true);
       const taskToInsert = {
         project_id: project.id,
         title: newTaskForm.title,
@@ -60,12 +62,10 @@ const NewTaskDialog = ({ open, onOpenChange, project, fetchTasksForProject, toas
             ? null
             : newTaskForm.scoped_path_id,
       };
-      const { data, error } = await supabase
-        .from('tasks')
-        .insert(taskToInsert)
-        .select()
-        .single();
-      if (error) throw error;
+      
+      // Use apiClient instead of direct supabase call
+      const data = await apiClient.tasks.create(taskToInsert);
+      
       toast({
         title: 'Task Created',
         description: `Task "${data.title}" created.`,
@@ -80,6 +80,8 @@ const NewTaskDialog = ({ open, onOpenChange, project, fetchTasksForProject, toas
         description: error.message,
         variant: 'destructive',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -173,10 +175,13 @@ const NewTaskDialog = ({ open, onOpenChange, project, fetchTasksForProject, toas
                 onOpenChange(false);
                 setNewTaskForm(initialTaskFormState);
               }}
+              disabled={loading}
             >
               Cancel
             </Button>
-            <Button type="submit">Create Task</Button>
+            <Button type="submit" disabled={loading}>
+              {loading ? 'Creating...' : 'Create Task'}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

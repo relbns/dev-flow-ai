@@ -19,47 +19,98 @@ import {
 import { Clock, MoreVertical, Users, Edit, Trash2, AlertCircle, ExternalLink, Eye, User } from 'lucide-react'; // Added User
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { useToast } from "@/hooks/use-toast"; 
-import { supabase } from '@/lib/supabaseClient'; // Using @ alias
+import { apiClient } from '@/lib/apiClient'; // Use apiClient instead of supabase
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"; // Import Avatar components
 
 const ProjectCard = ({ project, onProjectDeleted }) => { 
   const { toast } = useToast(); 
   const navigate = useNavigate(); 
 
+  // Debug log to inspect the project data
+  console.log('ProjectCard received project:', project);
+
+  // Helper to get the project ID, supporting both MongoDB _id and regular id formats
+  const getProjectId = () => {
+    if (!project) return null;
+    return project._id || project.id || null;
+  };
+  
+  // Helper to get the owner details
+  const getOwnerName = () => {
+    if (!project) return 'Unknown';
+    
+    // Handle different owner data structures
+    if (project.owner && project.owner.displayName) {
+      return project.owner.displayName;
+    } else if (project.owner && project.owner.name) {
+      return project.owner.name;
+    } else if (project.leader && project.leader.name) {
+      return project.leader.name;
+    }
+    
+    return 'Unknown Owner';
+  };
+
+  // Handle opening a project detail page
   const handleOpenProject = () => {
-    navigate(`/projects/${project.id}`);
+    const projectId = getProjectId();
+    console.log('Opening project with ID:', projectId);
+    
+    if (projectId) {
+      navigate(`/projects/${projectId}`);
+    } else {
+      toast({ 
+        title: "Invalid Project", 
+        description: "This project has an invalid ID and cannot be opened.", 
+        variant: "destructive" 
+      });
+    }
   };
 
   const handleGoToRepository = () => {
-    if (project.github_repo_url) {
-      window.open(project.github_repo_url, '_blank', 'noopener,noreferrer');
+    // Check different possible repository URL locations in the project data
+    const repoUrl = project.githubRepo?.url || project.github_repo_url || project.repository || null;
+    
+    if (repoUrl) {
+      window.open(repoUrl, '_blank', 'noopener,noreferrer');
     } else {
       toast({ title: "No Repository URL", description: "This project does not have a GitHub repository URL set.", variant: "destructive" });
     }
   };
 
   const handleEdit = () => {
-    // You mentioned edit is implemented as a popup on the project page.
-    // So, clicking edit here might also navigate to the project page, perhaps with a query param?
-    // Or, if the project page itself has the edit functionality directly, this button might be redundant
-    // if "Open Project" takes you there. For now, let's keep the toast.
-    // toast({ title: "Edit Project", description: "Edit functionality is available on the project detail page." });
-    navigate(`/projects/${project.id}?action=edit`); 
+    const projectId = getProjectId();
+    
+    if (projectId) {
+      navigate(`/projects/${projectId}?action=edit`);
+    } else {
+      toast({ 
+        title: "Invalid Project", 
+        description: "This project has an invalid ID and cannot be edited.", 
+        variant: "destructive" 
+      });
+    }
   };
 
   const handleDelete = async () => {
-    // Confirmation is handled by AlertDialog trigger, actual delete logic here
-    try {
-      const { error } = await supabase.functions.invoke('delete-project', {
-        method: 'POST',
-        body: { project_id: project.id },
+    const projectId = getProjectId();
+    
+    if (!projectId) {
+      toast({ 
+        title: "Invalid Project", 
+        description: "This project has an invalid ID and cannot be deleted.", 
+        variant: "destructive" 
       });
-
-      if (error) throw error;
+      return;
+    }
+    
+    try {
+      // Use apiClient instead of supabase
+      await apiClient.projects.update(projectId, { status: 'deleted' });
 
       toast({ title: "Project Deleted", description: `Project "${project.name}" and all its data have been deleted.` });
       if (onProjectDeleted) {
-        onProjectDeleted(project.id); // Notify parent to refresh list
+        onProjectDeleted(projectId); // Notify parent to refresh list
       }
     } catch (err) {
       console.error("Error deleting project:", err);
@@ -80,22 +131,59 @@ const ProjectCard = ({ project, onProjectDeleted }) => {
     }
   };
 
+  // Handle null project
+  if (!project) {
+    console.warn('ProjectCard received null or undefined project');
+    return (
+      <Card className="hover:shadow-md transition-shadow">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Missing Project</CardTitle>
+          <p className="text-sm text-muted-foreground mt-1">No project data was provided.</p>
+        </CardHeader>
+        <CardContent className="pb-2">
+          <div className="text-xs text-muted-foreground flex items-center">
+            <AlertCircle className="h-3 w-3 mr-1" /> Project data is missing.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Handle project without ID
+  const projectId = getProjectId();
+  if (!projectId) {
+    console.warn('ProjectCard received project without valid ID:', project);
+    return (
+      <Card className="hover:shadow-md transition-shadow">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Invalid Project</CardTitle>
+          <p className="text-sm text-muted-foreground mt-1">This project has invalid data and cannot be displayed properly.</p>
+        </CardHeader>
+        <CardContent className="pb-2">
+          <div className="text-xs text-muted-foreground flex items-center">
+            <AlertCircle className="h-3 w-3 mr-1" /> Project data is incomplete.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // If we've made it here, we have a valid project with ID
   return (
     <Card className="hover:shadow-md transition-shadow">
       <CardHeader className="pb-2 flex flex-row items-start justify-between">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <CardTitle className="text-lg">
-              <Link to={`/projects/${project.id}`} className="hover:text-primary transition-colors">
+              <Link to={`/projects/${projectId}`} className="hover:text-primary transition-colors">
                 {project.name || "Unnamed Project"}
               </Link>
             </CardTitle>
-            {/* project.status is not in Supabase data yet, hide for now or add to schema later */}
-            {/* {project.status && (
+            {project.status && (
               <Badge variant={getStatusVariant(project.status)} className="capitalize">
                 {project.status}
               </Badge>
-            )} */}
+            )}
           </div>
           <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{project.description || "No description available."}</p>
         </div>
@@ -111,7 +199,7 @@ const ProjectCard = ({ project, onProjectDeleted }) => {
               <Eye className="mr-2 h-4 w-4" />
               <span>Open Project</span>
             </DropdownMenuItem>
-            {project.github_repo_url && (
+            {(project.githubRepo?.url || project.github_repo_url || project.repository) && (
               <DropdownMenuItem className="cursor-pointer" onClick={handleGoToRepository}>
                 <ExternalLink className="mr-2 h-4 w-4" />
                 <span>Go to Repository</span>
@@ -174,35 +262,26 @@ const ProjectCard = ({ project, onProjectDeleted }) => {
       </CardContent>
       <CardFooter className="pt-2 flex items-center justify-between text-sm text-muted-foreground">
         <div className="flex items-center gap-2">
-          {/* Display Leader Info */}
-          {project.leader ? (
-            <div className="flex items-center gap-2" title={`Leader: ${project.leader.raw_user_meta_data?.full_name || project.leader.email}`}>
-              <Avatar className="h-5 w-5">
-                <AvatarImage src={project.leader.raw_user_meta_data?.avatar_url} alt={project.leader.raw_user_meta_data?.full_name || project.leader.email} />
-                <AvatarFallback className="text-xs">
-                  {/* Simple fallback initials */}
-                  {(project.leader.raw_user_meta_data?.full_name || project.leader.email || 'U').substring(0, 1).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <span className="truncate max-w-[100px] text-xs">
-                {project.leader.raw_user_meta_data?.full_name || project.leader.email}
-              </span>
+          {/* Display Owner/Leader Info */}
+          <div className="flex items-center gap-1 text-xs">
+            <User className="h-4 w-4" />
+            <span className="truncate max-w-[100px]">
+              {getOwnerName()}
+            </span>
+          </div>
+          
+          {/* Display Members Count */}
+          {project.members && project.members.length > 0 && (
+            <div className="flex items-center gap-1 text-xs ml-3">
+              <Users className="h-4 w-4" />
+              <span>{project.members.length} members</span>
             </div>
-          ) : project.leader_user_id ? (
-             // Fallback if leader object is missing but ID exists
-             <div className="flex items-center gap-1 text-xs" title={`Leader User ID: ${project.leader_user_id}`}>
-               <User className="h-4 w-4" />
-               <span className="truncate max-w-[100px]">Leader ID: {project.leader_user_id.substring(0, 8)}...</span>
-             </div>
-          ) : null}
-          {/* project.members is not in Supabase data yet */}
-          {/* <Users className="h-4 w-4 ml-4" />
-          <span>{project.members || 'N/A'} members</span> */}
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Clock className="h-4 w-4" />
           <span>
-            Updated {project.updated_at ? formatDistanceToNow(parseISO(project.updated_at), { addSuffix: true }) : 'N/A'}
+            Updated {project.updatedAt ? formatDistanceToNow(parseISO(project.updatedAt), { addSuffix: true }) : 'N/A'}
           </span>
         </div>
       </CardFooter>

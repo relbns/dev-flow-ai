@@ -1,6 +1,6 @@
 // src/hooks/project/useProjectUsers.js
 import { useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient';
 
 export const useProjectUsers = (toast) => {
   const [availableLeaders, setAvailableLeaders] = useState([]);
@@ -14,91 +14,49 @@ export const useProjectUsers = (toast) => {
       setLoadingLeaders(true);
       setAvailableLeaders([]);
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const localCurrentUserId = session?.user?.id;
+      const token = localStorage.getItem('jwtToken');
+      if (!token) {
+        console.error('No authentication token found');
+        setLoadingLeaders(false);
+        return;
+      }
 
       try {
         let combinedGithubLogins = new Set();
 
         if (projectOrg && projectOrg !== 'Personal') {
-          // Fetch GitHub org members
-          const { data: orgMembers, error: orgMembersError } =
-            await supabase.functions.invoke('list-github-org-members', {
-              method: 'POST',
-              body: { orgName: projectOrg },
-            });
-
-          if (orgMembersError) {
-            console.error(
-              `Error fetching GitHub org members for ${projectOrg}:`,
-              orgMembersError
-            );
-            toast({
-              title: 'Error Fetching Org Members',
-              description: orgMembersError.message,
-              variant: 'destructive',
-            });
-            // Continue to fetch collaborators or fallback to current user
-          } else {
+          // Fetch GitHub org members using apiClient
+          try {
+            const orgMembers = await apiClient.github.getOrganizations();
             const orgMemberLogins =
               orgMembers
                 ?.map((member) => member.login)
                 .filter((login) => login) || [];
             orgMemberLogins.forEach((login) => combinedGithubLogins.add(login));
+          } catch (orgErr) {
+            console.error(
+              `Error fetching GitHub org members for ${projectOrg}:`,
+              orgErr
+            );
+            toast({
+              title: 'Error Fetching Org Members',
+              description: orgErr.message,
+              variant: 'destructive',
+            });
           }
         }
 
         // If a repo is specified, also get its collaborators
         if (repoFullName) {
           try {
-            // Ensure access_token is available for this call
-            if (!session?.access_token) {
-              throw new Error(
-                'User not authenticated or access token missing for repo collaborators fetch.'
-              );
-            }
-            const collaboratorsFunctionUrl = `${supabase.functions.getFunctionsUrl()}/list-github-repo-collaborators?repoFullName=${encodeURIComponent(
-              repoFullName
-            )}`;
-            const collaboratorsResponse = await fetch(
-              collaboratorsFunctionUrl,
-              {
-                method: 'GET',
-                headers: {
-                  Authorization: `Bearer ${session.access_token}`,
-                  'Content-Type': 'application/json',
-                },
-              }
+            const collaborators = await apiClient.github.getRepositories(repoFullName.split('/')[0]);
+            const collaboratorLogins =
+              collaborators
+                ?.map((collab) => collab.login || collab.owner?.login)
+                .filter((login) => login) || [];
+            collaboratorLogins.forEach((login) =>
+              combinedGithubLogins.add(login)
             );
-
-            if (collaboratorsResponse.ok) {
-              const collaborators = await collaboratorsResponse.json();
-              const collaboratorLogins =
-                collaborators
-                  ?.map((collab) => collab.login)
-                  .filter((login) => login) || [];
-              collaboratorLogins.forEach((login) =>
-                combinedGithubLogins.add(login)
-              );
-            } else {
-              const errorData = await collaboratorsResponse
-                .json()
-                .catch(() => ({
-                  error: `Failed to fetch repo collaborators: ${collaboratorsResponse.statusText}`,
-                }));
-              console.warn(
-                `Could not fetch collaborators for ${repoFullName}: ${
-                  errorData.error || collaboratorsResponse.statusText
-                }`
-              );
-              toast({
-                title: 'Warning',
-                description: `Could not fetch collaborators for ${repoFullName}. Users list might be incomplete.`,
-                variant: 'default',
-              });
-            }
           } catch (collabError) {
             console.warn(
               `Error fetching collaborators for ${repoFullName}:`,
@@ -115,15 +73,55 @@ export const useProjectUsers = (toast) => {
         const finalGithubLogins = Array.from(combinedGithubLogins);
 
         if (finalGithubLogins.length > 0) {
-          const { data: supabaseUsers, error: mapError } =
-            await supabase.functions.invoke(
-              'get-supabase-users-by-github-logins',
-              { method: 'POST', body: { github_logins: finalGithubLogins } }
-            );
-
-          if (mapError) {
+          // In the new server API, we'll use the appropriate endpoint
+          // This is a placeholder - you might need to create a specific endpoint for this
+          try {
+            const response = await fetch('/api/users/by-github-logins', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ github_logins: finalGithubLogins }),
+            });
+            
+            if (!response.ok) {
+              throw new Error('Failed to fetch users by GitHub logins');
+            }
+            
+            const supabaseUsers = await response.json();
+            setAvailableLeaders(supabaseUsers || []);
+            
+            // If no users found, set current user as default
+            if ((!supabaseUsers || supabaseUsers.length === 0) && finalGithubLogins.length === 0) {
+              try {
+                // Fetch current user profile
+                const profileResponse = await fetch('/api/auth/profile', {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                  },
+                });
+                
+                if (profileResponse.ok) {
+                  const currentUserProfile = await profileResponse.json();
+                  setAvailableLeaders([
+                    {
+                      id: currentUserProfile.id,
+                      display_name:
+                        currentUserProfile?.full_name ||
+                        currentUserProfile?.username ||
+                        currentUserProfile?.email ||
+                        'Current User',
+                    },
+                  ]);
+                }
+              } catch (profileError) {
+                console.error('Error fetching user profile:', profileError);
+              }
+            }
+          } catch (mapError) {
             console.error(
-              'Error mapping GitHub logins to Supabase users:',
+              'Error mapping GitHub logins to users:',
               mapError
             );
             toast({
@@ -131,50 +129,30 @@ export const useProjectUsers = (toast) => {
               description: mapError.message,
               variant: 'destructive',
             });
-            if (localCurrentUserId) {
-              // Fallback to current user if mapping fails
-              const { data: currentUserProfile } = await supabase
-                .from('profiles')
-                .select('id, full_name, username')
-                .eq('id', localCurrentUserId)
-                .single();
-              setAvailableLeaders([
-                {
-                  id: localCurrentUserId,
-                  display_name:
-                    currentUserProfile?.full_name ||
-                    currentUserProfile?.username ||
-                    session?.user?.email ||
-                    'Current User',
+            
+            // Fallback to current user
+            try {
+              const profileResponse = await fetch('/api/auth/profile', {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
                 },
-              ]);
-            }
-          } else {
-            setAvailableLeaders(supabaseUsers || []);
-            if (
-              (!supabaseUsers || supabaseUsers.length === 0) &&
-              localCurrentUserId &&
-              finalGithubLogins.length === 0
-            ) {
-              // Only if no logins were found at all
-              console.warn(
-                'No Supabase users found for combined logins. Setting current user as default leader.'
-              );
-              const { data: currentUserProfile } = await supabase
-                .from('profiles')
-                .select('id, full_name, username')
-                .eq('id', localCurrentUserId)
-                .single();
-              setAvailableLeaders([
-                {
-                  id: localCurrentUserId,
-                  display_name:
-                    currentUserProfile?.full_name ||
-                    currentUserProfile?.username ||
-                    session?.user?.email ||
-                    'Current User',
-                },
-              ]);
+              });
+              
+              if (profileResponse.ok) {
+                const currentUserProfile = await profileResponse.json();
+                setAvailableLeaders([
+                  {
+                    id: currentUserProfile.id,
+                    display_name:
+                      currentUserProfile?.full_name ||
+                      currentUserProfile?.username ||
+                      currentUserProfile?.email ||
+                      'Current User',
+                  },
+                ]);
+              }
+            } catch (profileError) {
+              console.error('Error fetching user profile:', profileError);
             }
           }
         } else {
@@ -182,22 +160,29 @@ export const useProjectUsers = (toast) => {
           console.warn(
             'No GitHub logins found from org members or collaborators. Setting current user as default leader.'
           );
-          if (localCurrentUserId) {
-            const { data: currentUserProfile } = await supabase
-              .from('profiles')
-              .select('id, full_name, username')
-              .eq('id', localCurrentUserId)
-              .single();
-            setAvailableLeaders([
-              {
-                id: localCurrentUserId,
-                display_name:
-                  currentUserProfile?.full_name ||
-                  currentUserProfile?.username ||
-                  session?.user?.email ||
-                  'Current User',
+          
+          try {
+            const profileResponse = await fetch('/api/auth/profile', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
               },
-            ]);
+            });
+            
+            if (profileResponse.ok) {
+              const currentUserProfile = await profileResponse.json();
+              setAvailableLeaders([
+                {
+                  id: currentUserProfile.id,
+                  display_name:
+                    currentUserProfile?.full_name ||
+                    currentUserProfile?.username ||
+                    currentUserProfile?.email ||
+                    'Current User',
+                },
+              ]);
+            }
+          } catch (profileError) {
+            console.error('Error fetching user profile:', profileError);
           }
         }
       } catch (error) {
@@ -207,23 +192,30 @@ export const useProjectUsers = (toast) => {
           description: error.message,
           variant: 'destructive',
         });
-        if (localCurrentUserId) {
-          // Fallback to current user on any error
-          const { data: currentUserProfile } = await supabase
-            .from('profiles')
-            .select('id, full_name, username')
-            .eq('id', localCurrentUserId)
-            .single();
-          setAvailableLeaders([
-            {
-              id: localCurrentUserId,
-              display_name:
-                currentUserProfile?.full_name ||
-                currentUserProfile?.username ||
-                session?.user?.email ||
-                'Current User',
+        
+        // Fallback to current user on any error
+        try {
+          const profileResponse = await fetch('/api/auth/profile', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
             },
-          ]);
+          });
+          
+          if (profileResponse.ok) {
+            const currentUserProfile = await profileResponse.json();
+            setAvailableLeaders([
+              {
+                id: currentUserProfile.id,
+                display_name:
+                  currentUserProfile?.full_name ||
+                  currentUserProfile?.username ||
+                  currentUserProfile?.email ||
+                  'Current User',
+              },
+            ]);
+          }
+        } catch (profileError) {
+          console.error('Error fetching user profile:', profileError);
         }
       } finally {
         setLoadingLeaders(false);

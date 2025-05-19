@@ -1,7 +1,7 @@
 // src/hooks/project/useProjectData.js
 import { useState, useCallback, useEffect } from 'react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
-import { supabase } from '@/lib/supabaseClient';
+import { apiClient } from '@/lib/apiClient';
 
 export const useProjectData = (projectId, navigate, toast) => {
   const [project, setProject] = useState(null);
@@ -13,25 +13,63 @@ export const useProjectData = (projectId, navigate, toast) => {
     completed: [],
   });
 
+  // Helper to normalize ObjectId - MongoDB uses _id, frontend might expect id
+  const normalizeId = (data) => {
+    if (!data) return null;
+    
+    // If it's an array, map through each item
+    if (Array.isArray(data)) {
+      return data.map(item => normalizeId(item));
+    }
+    
+    // If it's an object, process it
+    if (typeof data === 'object') {
+      const result = { ...data };
+      
+      // If the object has _id but no id, add id
+      if (result._id && !result.id) {
+        result.id = result._id;
+      }
+      
+      // Process nested objects
+      Object.keys(result).forEach(key => {
+        if (typeof result[key] === 'object' && result[key] !== null) {
+          result[key] = normalizeId(result[key]);
+        }
+      });
+      
+      return result;
+    }
+    
+    return data;
+  };
+
   // Fetch tasks for project
   const fetchTasksForProject = useCallback(
     async (currentProjectId) => {
-      if (!currentProjectId) return;
+      if (!currentProjectId) {
+        console.warn('Cannot fetch tasks: Project ID is missing or invalid');
+        return;
+      }
+      
       try {
-        const { data: tasksData, error: tasksError } = await supabase
-          .from('tasks')
-          .select('*')
-          .eq('project_id', currentProjectId)
-          .order('created_at', { ascending: true });
+        // Use apiClient to fetch tasks
+        const tasksData = await apiClient.tasks.list({ project_id: currentProjectId });
 
-        if (tasksError) throw tasksError;
+        if (!tasksData || !Array.isArray(tasksData)) {
+          console.warn('No valid tasks data returned');
+          return;
+        }
+
+        // Normalize IDs in tasks data
+        const normalizedTasksData = normalizeId(tasksData);
 
         const newProjectTasksData = {
-          notStarted: tasksData.filter(
+          notStarted: normalizedTasksData.filter(
             (task) => task.status === 'Backlog' || task.status === 'To Do'
           ),
-          inProgress: tasksData.filter((task) => task.status === 'In Progress'),
-          completed: tasksData.filter(
+          inProgress: normalizedTasksData.filter((task) => task.status === 'In Progress'),
+          completed: normalizedTasksData.filter(
             (task) => task.status === 'Done' || task.status === 'In Review'
           ),
         };
@@ -44,8 +82,8 @@ export const useProjectData = (projectId, navigate, toast) => {
               assignee: { name: 'Unassigned', avatar: '' },
               comments: 0,
               priority: 'medium',
-              dueDate: task.updated_at
-                ? formatDistanceToNow(parseISO(task.updated_at), {
+              dueDate: task.updated_at || task.updatedAt
+                ? formatDistanceToNow(parseISO(task.updated_at || task.updatedAt), {
                     addSuffix: true,
                   })
                 : 'N/A',
@@ -69,8 +107,15 @@ export const useProjectData = (projectId, navigate, toast) => {
   // Fetch project details
   const fetchProjectDetails = useCallback(async () => {
     if (!projectId) {
-      setError('Project ID is missing.');
+      setError('Project ID is missing or invalid.');
       setLoading(false);
+      // Redirect to projects list if projectId is undefined
+      navigate('/projects');
+      toast({
+        title: 'Invalid Project',
+        description: 'The requested project could not be found. Redirecting to projects list.',
+        variant: 'destructive',
+      });
       return;
     }
     
@@ -78,68 +123,84 @@ export const useProjectData = (projectId, navigate, toast) => {
     setError(null);
     
     try {
-      const { data: projectDetailsData, error: projectError } = await supabase
-        .from('projects')
-        .select(
-          '*, project_guidelines (id, guideline_text, "order"), scoped_paths (id, name, path_in_repo, notes)'
-        )
-        .eq('id', projectId)
-        .single();
+      // Use apiClient to get project details
+      const projectDetailsData = await apiClient.projects.getDetails(projectId);
+      console.log('Project details from API:', projectDetailsData);
 
-      if (projectError) throw projectError;
+      if (!projectDetailsData) {
+        throw new Error('Project not found or returned empty data.');
+      }
 
-      if (projectDetailsData) {
-        setProject({
-          ...projectDetailsData,
-          subtitle:
-            projectDetailsData.description?.substring(0, 50) + '...' || '',
-          links: projectDetailsData.links || [],
-          members: projectDetailsData.members || [
-            {
-              id: 'temp-lead',
-              name: 'Loading Lead...',
-              role: 'Project Lead',
-              avatar: '',
-            },
-          ],
-          stakeholders: projectDetailsData.stakeholders || [],
-          status: projectDetailsData.status || 'active',
-        });
-        fetchTasksForProject(projectDetailsData.id);
-      } else {
-        setError('Project not found.');
+      // Normalize the project data to have both _id and id fields
+      const normalizedProject = normalizeId(projectDetailsData);
+      console.log('Normalized project data:', normalizedProject);
+
+      setProject({
+        ...normalizedProject,
+        subtitle:
+          normalizedProject.description?.substring(0, 50) + '...' || '',
+        links: normalizedProject.links || [],
+        members: normalizedProject.members || [
+          {
+            id: 'temp-lead',
+            name: 'Loading Lead...',
+            role: 'Project Lead',
+            avatar: '',
+          },
+        ],
+        stakeholders: normalizedProject.stakeholders || [],
+        status: normalizedProject.status || 'active',
+      });
+      
+      // Only fetch tasks if we have a valid project
+      const projectIdToUse = normalizedProject.id || normalizedProject._id;
+      if (projectIdToUse) {
+        fetchTasksForProject(projectIdToUse);
       }
     } catch (err) {
       console.error('Error fetching project details:', err);
       setError(err.message || 'Failed to fetch project details.');
       toast({
-        title: 'Error',
+        title: 'Error Loading Project',
         description: err.message,
         variant: 'destructive',
       });
+      
+      // If the project doesn't exist, redirect to the projects list
+      if (err.message.includes('not found') || err.status === 404) {
+        navigate('/projects');
+      }
     } finally {
       setLoading(false);
     }
-  }, [projectId, toast, fetchTasksForProject]);
+  }, [projectId, toast, fetchTasksForProject, navigate]);
 
   // Delete project
   const handleDeleteProject = async () => {
-    if (!project || !project.id) {
+    if (!project) {
       toast({
         title: 'Error',
-        description: 'Project context is missing.',
+        description: 'Project context is missing or invalid.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    // Use either id or _id
+    const projectIdToUse = project.id || project._id;
+    
+    if (!projectIdToUse) {
+      toast({
+        title: 'Error',
+        description: 'Project ID is missing.',
         variant: 'destructive',
       });
       return;
     }
     
     try {
-      const { error } = await supabase.functions.invoke('delete-project', {
-        method: 'POST',
-        body: { project_id: project.id },
-      });
-
-      if (error) throw error;
+      // Use apiClient to update project status to 'deleted'
+      await apiClient.projects.update(projectIdToUse, { status: 'deleted' });
 
       toast({
         title: 'Project Deleted',
