@@ -2,7 +2,7 @@
 
 import dotenv from 'dotenv';
 import { Command } from 'commander';
-import fs from 'fs-extra'; // Changed from 'fs' to 'fs-extra'
+import fs from 'fs-extra';
 import path from 'path';
 import { execSync } from 'child_process';
 import express from 'express';
@@ -21,6 +21,7 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
+import { checkAgentRunning, getLockInfo } from './utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,12 +40,12 @@ let PORT = DEFAULT_PORT;
 const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'));
 
 // --- Utility Functions ---
-function stripAnsi(str) {
+function stripAnsi (str) {
   const ansiRegex = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
   return str.replace(ansiRegex, '');
 }
 
-function getFileContent(filePath, projectRoot) {
+function getFileContent (filePath, projectRoot) {
   const absoluteFilePath = path.resolve(projectRoot, filePath);
   if (!absoluteFilePath.startsWith(path.resolve(projectRoot))) {
     throw new Error(`Access denied: File path "${filePath}" is outside the allowed project root "${projectRoot}".`);
@@ -55,7 +56,7 @@ function getFileContent(filePath, projectRoot) {
   return fs.readFileSync(absoluteFilePath, 'utf8');
 }
 
-function writeLocalFileContent(filePath, content, projectRoot) {
+function writeLocalFileContent (filePath, content, projectRoot) {
   const absoluteFilePath = path.resolve(projectRoot, filePath);
   if (!absoluteFilePath.startsWith(path.resolve(projectRoot))) {
     throw new Error(`Access denied: File path "${filePath}" is outside the allowed project root "${projectRoot}".`);
@@ -70,7 +71,7 @@ function writeLocalFileContent(filePath, content, projectRoot) {
   }
 }
 
-function listLocalFiles(directoryPath, recursive = false, projectRoot, ignorePatterns = ['node_modules', '.git', '.DS_Store']) {
+function listLocalFiles (directoryPath, recursive = false, projectRoot, ignorePatterns = ['node_modules', '.git', '.DS_Store']) {
   const resolvedPathToList = path.resolve(projectRoot, directoryPath);
   if (!resolvedPathToList.startsWith(path.resolve(projectRoot))) {
     throw new Error(`Access denied: Directory path "${directoryPath}" is outside the allowed project root "${projectRoot}".`);
@@ -99,7 +100,7 @@ function listLocalFiles(directoryPath, recursive = false, projectRoot, ignorePat
   return filesOutput;
 }
 
-function executeGitCommandUtility(gitArgsArray, executionCwd, projectRoot) {
+function executeGitCommandUtility (gitArgsArray, executionCwd, projectRoot) {
   const commandString = gitArgsArray.join(' ');
   const allowedCommandPatterns = [
     /^status(?: -s)?$/, /^rev-parse --abbrev-ref HEAD$/, /^checkout -b [\w.-]+$/,
@@ -121,6 +122,105 @@ function executeGitCommandUtility(gitArgsArray, executionCwd, projectRoot) {
     throw new Error(`Git command CWD "${absoluteExecutionCwd}" is not a valid directory.`);
   }
   return execSync(`git ${commandString}`, { cwd: absoluteExecutionCwd, encoding: 'utf8' });
+}
+
+/**
+ * Create directory and parent directories if needed
+ * @param {string} dirPath - Directory path to create
+ * @param {string} projectRoot - Root directory to validate against
+ * @returns {Object} - Success message
+ */
+function createDirectory (dirPath, projectRoot) {
+  if (!dirPath) {
+    throw new McpError(ErrorCode.InvalidParams, 'Directory path is required');
+  }
+
+  const absolutePath = path.isAbsolute(dirPath)
+    ? dirPath
+    : path.resolve(projectRoot, dirPath);
+
+  // Validate the path is within project root
+  if (!absolutePath.startsWith(projectRoot)) {
+    throw new McpError(ErrorCode.PermissionDenied, 'Cannot create directory outside project root');
+  }
+
+  try {
+    fs.ensureDirSync(absolutePath);
+    return {
+      success: true,
+      path: absolutePath,
+      relativePath: path.relative(projectRoot, absolutePath),
+      message: `Directory created: ${path.relative(projectRoot, absolutePath)}`
+    };
+  } catch (error) {
+    throw new McpError(ErrorCode.InternalError, `Failed to create directory: ${error.message}`);
+  }
+}
+
+/**
+ * Create empty file (touch)
+ * @param {string} filePath - File path to create
+ * @param {string} projectRoot - Root directory to validate against
+ * @returns {Object} - Success message
+ */
+function touchFile (filePath, projectRoot) {
+  if (!filePath) {
+    throw new McpError(ErrorCode.InvalidParams, 'File path is required');
+  }
+
+  const absolutePath = path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(projectRoot, filePath);
+
+  // Validate the path is within project root
+  if (!absolutePath.startsWith(projectRoot)) {
+    throw new McpError(ErrorCode.PermissionDenied, 'Cannot create file outside project root');
+  }
+
+  try {
+    // First ensure the directory exists
+    const dirPath = path.dirname(absolutePath);
+    fs.ensureDirSync(dirPath);
+
+    // Create or update the file's timestamp (equivalent to Unix touch)
+    const fileExists = fs.existsSync(absolutePath);
+
+    if (fileExists) {
+      // Update the file's access and modification times
+      const now = new Date();
+      fs.utimesSync(absolutePath, now, now);
+    } else {
+      // Create an empty file
+      fs.writeFileSync(absolutePath, '', 'utf8');
+    }
+
+    return {
+      success: true,
+      path: absolutePath,
+      relativePath: path.relative(projectRoot, absolutePath),
+      message: fileExists
+        ? `Updated timestamp: ${path.relative(projectRoot, absolutePath)}`
+        : `Created file: ${path.relative(projectRoot, absolutePath)}`
+    };
+  } catch (error) {
+    throw new McpError(ErrorCode.InternalError, `Failed to touch file: ${error.message}`);
+  }
+}
+
+/**
+ * Enhanced version of listLocalFiles that adds a hint for LLM
+ * @param {string} directoryPath - Directory to list
+ * @param {boolean} recursive - Whether to list recursively
+ * @param {string} projectRoot - Root directory to validate against
+ * @param {Array<string>} ignore - Patterns to ignore
+ * @returns {Object} - List of files with LLM hint
+ */
+function enhanceListResults (originalResults, projectRoot) {
+  // Add the LLM hint to the original results
+  return {
+    ...originalResults,
+    llmHint: `You can browse other directories using 'list_local_files' or create/modify files using 'mkdir', 'touch', or 'write_local_file_content'. The current root directory is ${projectRoot}.`
+  };
 }
 
 // --- Express App Setup ---
@@ -170,13 +270,13 @@ app.post('/mcp/:toolName', async (req, res) => {
       });
 
       let responseBody;
-      try { 
-        responseBody = await response.json(); 
-      } catch (e) { 
+      try {
+        responseBody = await response.json();
+      } catch (e) {
         const textBody = await response.text();
         console.error(chalk.red(`[HTTP MCP] Failed to parse JSON response from remote gateway for tool "${actualToolName}". Status: ${response.status}. Body: ${textBody}`));
         if (!response.ok) {
-            return res.status(response.status || 502).json({ error: `Remote tool "${actualToolName}" failed with status ${response.status}. Response: ${textBody}` });
+          return res.status(response.status || 502).json({ error: `Remote tool "${actualToolName}" failed with status ${response.status}. Response: ${textBody}` });
         }
         console.warn(chalk.yellow(`[HTTP MCP] Remote gateway response for "${actualToolName}" was OK but not valid JSON, returning as text.`));
         return res.status(200).json({ result: textBody });
@@ -194,7 +294,7 @@ app.post('/mcp/:toolName', async (req, res) => {
       }
       console.log(chalk.green(`[HTTP MCP] Successfully proxied remote tool call "${actualToolName}".`));
       return res.status(200).json({ result: responseBody.result });
-    } catch (error) { 
+    } catch (error) {
       console.error(chalk.red(`[HTTP MCP] Network error calling remote tool "${actualToolName}":`), error);
       return res.status(502).json({ error: `Failed to call remote tool "${actualToolName}": ${error.message}` });
     }
@@ -334,7 +434,7 @@ program
       if (!newConfig.root) delete newConfig.root;
       // Ensure devflowApiKeyRemote is handled correctly if apiKey is empty (though validated)
       if (!newConfig.devflowApiKeyRemote) {
-         delete newConfig.devflowApiKeyRemote;
+        delete newConfig.devflowApiKeyRemote;
       }
 
       if (newConfig.supabaseUrl === '') {
@@ -342,14 +442,21 @@ program
       } else if (!newConfig.supabaseUrl) {
         delete newConfig.supabaseUrl;
       }
-      
+
       writeConfig(newConfig);
     } catch (error) { console.error(chalk.red('Failed to save configuration:'), error.message); }
   });
 
 // --- Stdio MCP Server Setup ---
 const startStdioMcpServerAction = async () => {
-  const hostApiKey = process.env.DEVFLOW_API_KEY; 
+  // Ensure only one instance is running
+  if (checkAgentRunning()) {
+    const lockInfo = getLockInfo();
+    console.error(chalk.red(`DevFlow Agent is already running (PID: ${lockInfo.pid}, Mode: ${lockInfo.mode})`));
+    console.error(chalk.yellow('Use `devflow-local-agent stop` to stop the running agent first.'));
+    process.exit(1);
+  }
+  const hostApiKey = process.env.DEVFLOW_API_KEY;
   const maxRoot = process.env.DEVFLOW_MAX_ROOT ? path.resolve(process.env.DEVFLOW_MAX_ROOT) : null;
 
   if (!hostApiKey) { console.error(chalk.red('Error: DEVFLOW_API_KEY env var is required for stdio MCP mode.')); process.exit(1); }
@@ -412,9 +519,11 @@ const startStdioMcpServerAction = async () => {
         required: ['projectRoot', 'command_args'],
       },
     },
+    { name: 'mkdir', description: 'Creates a directory and any necessary parent directories' },
+    { name: 'touch', description: 'Creates a new empty file or updates the timestamp of an existing file' }
   ];
   const remoteTools = [
-     {
+    {
       name: 'remote_list_projects',
       description: 'Lists projects from the DevFlow AI backend.',
       inputSchema: {
@@ -422,7 +531,7 @@ const startStdioMcpServerAction = async () => {
         properties: {
           github_org_id: { type: ['integer', 'null'], description: 'Optional GitHub organization ID to filter projects.' }
         },
-        required: [], 
+        required: [],
       },
     },
     {
@@ -436,7 +545,7 @@ const startStdioMcpServerAction = async () => {
         required: ['project_id'],
       },
     },
-     {
+    {
       name: 'remote_list_tasks',
       description: 'Lists tasks for a specific project from the DevFlow AI backend.',
       inputSchema: {
@@ -528,9 +637,9 @@ const startStdioMcpServerAction = async () => {
     if (name.startsWith('remote_')) {
       const config = readConfig();
       const supabaseUrl = config.supabaseUrl;
-      const remoteApiKeyForGateway = config.devflowApiKeyRemote; 
+      const remoteApiKeyForGateway = config.devflowApiKeyRemote;
       if (!supabaseUrl || !remoteApiKeyForGateway) throw new McpError(ErrorCode.ConfigurationError, `Local agent not configured for remote access. Run 'devflow-local-agent configure'.`);
-      
+
       const actualToolName = name.substring('remote_'.length);
       const mcpGatewayUrl = `${supabaseUrl}/functions/v1/mcp-gateway`;
       const payload = { tool_name: actualToolName, arguments: args || {} };
@@ -542,7 +651,7 @@ const startStdioMcpServerAction = async () => {
           headers: { 'Content-Type': 'application/json', 'X-DevFlow-API-Key': remoteApiKeyForGateway },
           body: JSON.stringify(payload)
         });
-        
+
         let responseBody;
         try { responseBody = await response.json(); } catch (e) { responseBody = await response.text(); }
 
@@ -563,11 +672,11 @@ const startStdioMcpServerAction = async () => {
         if (localTools.some(lt => lt.name === name)) throw new McpError(ErrorCode.InvalidParams, `Local tool "${name}" requires "projectRoot" argument in Stdio mode.`);
       }
       const callProjectRoot = args.projectRoot ? path.resolve(args.projectRoot) : null;
-      if (callProjectRoot) { 
+      if (callProjectRoot) {
         if (!path.isAbsolute(callProjectRoot)) throw new McpError(ErrorCode.InvalidParams, `"projectRoot" must be absolute.`);
         if (maxRoot && !callProjectRoot.startsWith(maxRoot)) throw new McpError(ErrorCode.PermissionDenied, `projectRoot outside DEVFLOW_MAX_ROOT.`);
         if (!fs.existsSync(callProjectRoot) || !fs.lstatSync(callProjectRoot).isDirectory()) throw new McpError(ErrorCode.InvalidParams, `projectRoot not a valid directory.`);
-      } else if (localTools.some(lt => lt.name === name)) { 
+      } else if (localTools.some(lt => lt.name === name)) {
         throw new McpError(ErrorCode.InvalidParams, `Local tool "${name}" requires "projectRoot" argument, but it was not provided or was invalid.`);
       }
 
@@ -576,8 +685,17 @@ const startStdioMcpServerAction = async () => {
         switch (name) {
           case 'get_local_file_content': result = getFileContent(args.filePath, callProjectRoot); break;
           case 'write_local_file_content': result = writeLocalFileContent(args.filePath, args.content, callProjectRoot); break;
-          case 'list_local_files': result = listLocalFiles(args.directoryPath, args.recursive, callProjectRoot, args.ignore); break;
           case 'execute_git_command': result = { output: executeGitCommandUtility(args.command_args, args.executionCwd || '.', callProjectRoot).trim() }; break;
+          case 'list_local_files':
+            const listResults = listLocalFiles(args.directoryPath, args.recursive, callProjectRoot, args.ignore);
+            result = enhanceListResults(listResults, callProjectRoot);
+            break;
+          case 'mkdir':
+            result = createDirectory(args.dirPath, callProjectRoot);
+            break;
+          case 'touch':
+            result = touchFile(args.filePath, callProjectRoot);
+            break;
           default: throw new McpError(ErrorCode.MethodNotFound, `Tool "${name}" not found.`);
         }
         return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }] };
