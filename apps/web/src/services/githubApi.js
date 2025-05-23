@@ -1,13 +1,24 @@
 // src/services/githubApi.js
 import { apiClient } from '@/lib/apiClient';
 
+// Helper function to determine the API base URL
+const getApiBaseUrl = () => {
+  // If we're on GitHub Pages, use the absolute Vercel URL
+  if (window.location.hostname.includes('github.io')) {
+    return 'https://dev-flow-ai.vercel.app/api';
+  }
+  // Otherwise, use the relative path
+  return '/api';
+};
+
 /**
  * Fetch GitHub organizations for the authenticated user
  * @returns {Promise<Array>} - Array of GitHub organization objects
  */
 export const getGitHubOrgs = async () => {
   try {
-    const response = await fetch('/api/github/organizations', {
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/github/organizations`, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('jwtToken')}`,
         'Content-Type': 'application/json',
@@ -33,7 +44,8 @@ export const getGitHubOrgs = async () => {
  */
 export const getRepositories = async (orgName) => {
   try {
-    const response = await fetch(`/api/github/repositories${orgName ? `?org=${orgName}` : ''}`, {
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/github/repositories${orgName ? `?org=${orgName}` : ''}`, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('jwtToken')}`,
         'Content-Type': 'application/json',
@@ -58,7 +70,8 @@ export const getRepositories = async (orgName) => {
  */
 export const getGitHubAuthUrl = async () => {
   try {
-    const response = await fetch('/api/auth/github/login');
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/auth/github/login`);
     
     if (!response.ok) {
       const error = await response.json();
@@ -77,5 +90,11 @@ export const getGitHubAuthUrl = async () => {
  * Handles the GitHub login flow
  */
 export const handleGitHubLogin = () => {
-  window.location.href = '/api/auth/github/login';
+  // If we're on GitHub Pages, use the absolute Vercel URL
+  if (window.location.hostname.includes('github.io')) {
+    window.location.href = 'https://dev-flow-ai.vercel.app/auth/github/login';
+  } else {
+    // Otherwise, use the relative path
+    window.location.href = '/api/auth/github/login';
+  }
 };

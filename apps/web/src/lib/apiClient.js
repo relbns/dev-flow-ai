@@ -8,8 +8,21 @@ export const clearRateLimitTracking = () => {
   console.log('Rate limit tracking has been cleared');
 };
 
-// Error handling improvements for rate limiting
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+// Determine the base URL considering GitHub Pages deployment
+const getBaseUrl = () => {
+  const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+  
+  // Handle GitHub Pages deployment scenario
+  if (window.location.hostname.includes('github.io') && apiBase === '/api') {
+    // We're on GitHub Pages but using relative API path, need to use absolute URL
+    console.log('Detected GitHub Pages deployment, using absolute API URL');
+    return 'https://dev-flow-ai.vercel.app/api';
+  }
+  
+  return apiBase;
+};
+
+const BASE_URL = getBaseUrl();
 
 // Track rate limited endpoints to avoid repeated requests
 // We'll store in localStorage to persist across page reloads
@@ -528,8 +541,13 @@ export const apiClient = {
       // Clear any rate limiting before login
       clearRateLimitTracking();
       
-      // Redirect to GitHub login
-      window.location.href = `${BASE_URL}/auth/github/login`;
+      // For GitHub Pages deployment, we need to use the full URL
+      if (window.location.hostname.includes('github.io')) {
+        window.location.href = 'https://dev-flow-ai.vercel.app/auth/github/login';
+      } else {
+        // In local or direct Vercel deployment, we can use the relative URL
+        window.location.href = `${BASE_URL}/auth/github/login`;
+      }
     },
     
     getProfile: async () => {
@@ -598,7 +616,7 @@ export const apiClient = {
     
     // Method to clear rate limiting tracking
     clearRateLimits: clearRateLimitTracking
-  },
+  }
 };
 
 // Add a method to the window object to allow clearing rate limits from the console

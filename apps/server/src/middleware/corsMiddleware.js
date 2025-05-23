@@ -11,7 +11,18 @@ export const corsMiddleware = () => {
       // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
       
-      if (allowedOrigins.indexOf(origin) !== -1) {
+      // Check if the origin or any origin with an additional path matches
+      const isAllowed = allowedOrigins.some(allowedOrigin => {
+        // Direct match
+        if (origin === allowedOrigin) return true;
+        
+        // Check if origin starts with an allowed origin
+        // This handles cases like 'https://yourusername.github.io/dev-flow-ai'
+        // when 'https://yourusername.github.io' is in the allowed origins
+        return origin.startsWith(allowedOrigin);
+      });
+      
+      if (isAllowed) {
         callback(null, true);
       } else {
         console.warn(`Origin ${origin} not allowed by CORS policy`);

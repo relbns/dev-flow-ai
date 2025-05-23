@@ -14,7 +14,8 @@ export const getGithubOAuthUrl = () => {
         'read:org'
     ].join(' ');
 
-    return `https://github.com/login/oauth/authorize?client_id=${githubClientId}&redirect_uri=${redirectUri}&scope=${scopes}`;
+    // Adding prompt=consent to force GitHub to show the authorization screen every time
+    return `https://github.com/login/oauth/authorize?client_id=${githubClientId}&redirect_uri=${redirectUri}&scope=${scopes}&prompt=consent`;
 };
 
 export const exchangeCodeForToken = async (code) => {

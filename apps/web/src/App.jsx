@@ -18,6 +18,11 @@ import {
 import './App.css';
 import { AuthProvider } from '@/hooks/useAuth';
 
+// Get base path for GitHub Pages deployment
+const basePath = import.meta.env.PROD && window.location.hostname.includes('github.io') 
+  ? '/dev-flow-ai' 
+  : '';
+
 // Define router configuration
 const router = createBrowserRouter([
   {
@@ -99,7 +104,9 @@ const router = createBrowserRouter([
       },
     ],
   },
-]);
+], {
+  basename: basePath
+});
 
 // Export the function component as default
 const App = () => {

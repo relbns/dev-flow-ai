@@ -35,6 +35,7 @@ const refreshUserGithubToken = async (user) => {
 
 // Create configured GitHub API client
 const createGithubClient = (accessToken) => {
+    // GitHub API expects the token to be prefixed with 'token ' not 'Bearer '
     return axios.create({
         baseURL: 'https://api.github.com',
         headers: {
@@ -53,16 +54,23 @@ export const fetchUserOrganizations = async (user) => {
             throw new Error('User or access token not found');
         }
 
+        console.log(`Fetching organizations for user ${userWithToken.username}...`);
+
         // Create GitHub client
         const github = createGithubClient(userWithToken.accessToken);
 
         // Fetch organizations
+        console.log('Making GitHub API request to /user/orgs');
         const response = await github.get('/user/orgs');
+        
+        console.log(`GitHub API response received, found ${response.data.length} organizations`);
+        console.log('Organizations data:', JSON.stringify(response.data, null, 2));
 
         // Map the response to our format
         const organizations = response.data.map(org => ({
             id: org.id.toString(),
             login: org.login,
+            name: org.name || org.login,
             avatarUrl: org.avatar_url
         }));
 
@@ -75,15 +83,20 @@ export const fetchUserOrganizations = async (user) => {
     } catch (error) {
         // Handle token expiration
         if (error.response && error.response.status === 401) {
+            console.log('Token expired, attempting to refresh...');
             try {
                 const newToken = await refreshUserGithubToken(user);
                 // Retry with new token
                 const github = createGithubClient(newToken);
+                console.log('Making GitHub API request with refreshed token');
                 const response = await github.get('/user/orgs');
+
+                console.log(`GitHub API response received, found ${response.data.length} organizations after refresh`);
 
                 const organizations = response.data.map(org => ({
                     id: org.id.toString(),
                     login: org.login,
+                    name: org.name || org.login,
                     avatarUrl: org.avatar_url
                 }));
 
@@ -100,6 +113,10 @@ export const fetchUserOrganizations = async (user) => {
         }
 
         console.error('Error fetching GitHub organizations:', error);
+        if (error.response) {
+            console.error('Response status:', error.response.status);
+            console.error('Response data:', error.response.data);
+        }
         throw error;
     }
 };
@@ -113,10 +130,13 @@ export const fetchOrganizationRepos = async (user, orgName) => {
             throw new Error('User or access token not found');
         }
 
+        console.log(`Fetching repositories for organization ${orgName}...`);
+
         // Create GitHub client
         const github = createGithubClient(userWithToken.accessToken);
 
         // Fetch repositories
+        console.log(`Making GitHub API request to /orgs/${orgName}/repos`);
         const response = await github.get(`/orgs/${orgName}/repos`, {
             params: {
                 per_page: 100,
@@ -124,6 +144,8 @@ export const fetchOrganizationRepos = async (user, orgName) => {
                 direction: 'desc'
             }
         });
+
+        console.log(`GitHub API response received, found ${response.data.length} repositories`);
 
         // Map the response to our format
         return response.data.map(repo => ({
@@ -142,10 +164,12 @@ export const fetchOrganizationRepos = async (user, orgName) => {
     } catch (error) {
         // Handle token expiration
         if (error.response && error.response.status === 401) {
+            console.log('Token expired, attempting to refresh...');
             try {
                 const newToken = await refreshUserGithubToken(user);
                 // Retry with new token
                 const github = createGithubClient(newToken);
+                console.log('Making GitHub API request with refreshed token');
                 const response = await github.get(`/orgs/${orgName}/repos`, {
                     params: {
                         per_page: 100,
@@ -174,6 +198,10 @@ export const fetchOrganizationRepos = async (user, orgName) => {
         }
 
         console.error(`Error fetching repositories for organization ${orgName}:`, error);
+        if (error.response) {
+            console.error('Response status:', error.response.status);
+            console.error('Response data:', error.response.data);
+        }
         throw error;
     }
 };
@@ -187,18 +215,23 @@ export const fetchUserRepos = async (user) => {
             throw new Error('User or access token not found');
         }
 
+        console.log(`Fetching repositories for user ${userWithToken.username}...`);
+
         // Create GitHub client
         const github = createGithubClient(userWithToken.accessToken);
 
         // Fetch repositories
+        console.log('Making GitHub API request to /user/repos');
         const response = await github.get('/user/repos', {
             params: {
                 per_page: 100,
                 sort: 'updated',
                 direction: 'desc',
-                affiliation: 'owner,collaborator'
+                affiliation: 'owner,collaborator,organization_member'
             }
         });
+
+        console.log(`GitHub API response received, found ${response.data.length} repositories`);
 
         // Map the response to our format
         return response.data.map(repo => ({
@@ -217,16 +250,18 @@ export const fetchUserRepos = async (user) => {
     } catch (error) {
         // Handle token expiration
         if (error.response && error.response.status === 401) {
+            console.log('Token expired, attempting to refresh...');
             try {
                 const newToken = await refreshUserGithubToken(user);
                 // Retry with new token
                 const github = createGithubClient(newToken);
+                console.log('Making GitHub API request with refreshed token');
                 const response = await github.get('/user/repos', {
                     params: {
                         per_page: 100,
                         sort: 'updated',
                         direction: 'desc',
-                        affiliation: 'owner,collaborator'
+                        affiliation: 'owner,collaborator,organization_member'
                     }
                 });
 
@@ -250,6 +285,10 @@ export const fetchUserRepos = async (user) => {
         }
 
         console.error('Error fetching user repositories:', error);
+        if (error.response) {
+            console.error('Response status:', error.response.status);
+            console.error('Response data:', error.response.data);
+        }
         throw error;
     }
 };

@@ -10,9 +10,15 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Set base URL for GitHub Pages deployment
+  base: process.env.GITHUB_PAGES === 'true' ? '/dev-flow-ai/' : '/',
+  build: {
+    outDir: process.env.GITHUB_PAGES === 'true' ? 'dist' : '../server/public',
+    emptyOutDir: true,
+  },
   server: {
     port: 5173,
-    // Proxy API requests to the backend server
+    // Proxy API requests to the backend server during development
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
