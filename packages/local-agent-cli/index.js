@@ -21,7 +21,6 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
-import { checkAgentRunning, getLockInfo } from './utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,12 +28,11 @@ const __dirname = path.dirname(__filename);
 dotenv.config();
 const program = new Command();
 
+// Use current working directory as the project root for singleton behavior
 const INITIAL_CWD = process.cwd();
-let currentApiKey = null; // For authenticating incoming requests TO this agent's HTTP server
-let currentProjectRoot = INITIAL_CWD;
+let currentApiKey = null;
+let currentProjectRoot = INITIAL_CWD; // Always use where the command was run
 const DEFAULT_PORT = 52173;
-const DEFAULT_SUPABASE_URL = 'https://xfoxoiurhhqjjhqhoaaf.supabase.co';
-let PORT = DEFAULT_PORT;
 
 // Helper to read package.json for version
 const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'));
@@ -103,28 +101,23 @@ function listLocalFiles (directoryPath, recursive = false, projectRoot, ignorePa
 function executeGitCommandUtility (gitArgsArray, executionCwd, projectRoot) {
   const commandString = gitArgsArray.join(' ');
   const allowedCommandPatterns = [
-    // Current allowed commands
     /^status(?: -s)?$/,
     /^rev-parse --abbrev-ref HEAD$/,
     /^checkout -b [\w.-]+$/,
     /^checkout [\w.-]+$/,
     /^add (?:[\w.-/]+|\.)$/,
     /^commit -m ".+"$/,
-    /^push(?: [\w.-]+ [\w.-]+)?$/,
-    /^pull(?: [\w.-]+ [\w.-]+)?$/,
     /^branch$/,
     /^log(?: -\d+)?(?: --oneline)?(?: --graph)?(?: --decorate)?(?: --all)?$/,
-
-    // Additional useful commands
-    /^grep(?: -[a-zA-Z0-9]+)* (?:--[a-zA-Z0-9-]+(?: [^\s]+)?)* .+/, // grep with options
-    /^diff(?: --name-only)?(?: --staged)?(?: [^\s]+)*$/, // diff with common options
-    /^show(?: [a-f0-9]{7,40})?$/, // show commit details
-    /^ls-files(?: --others)?(?: --modified)?(?: --exclude-standard)?$/, // list files
-    /^stash(?: list)?$/, // stash without destructive operations
-    /^config(?: --get)? [^\s]+$/, // safe config reads
-    /^remote -v$/, // list remotes
-    /^tag$/, // list tags
-    /^fetch(?: [^\s]+)?$/ // fetch updates
+    /^grep(?: -[a-zA-Z0-9]+)* (?:--[a-zA-Z0-9-]+(?: [^\s]+)?)* .+/,
+    /^diff(?: --name-only)?(?: --staged)?(?: [^\s]+)*$/,
+    /^show(?: [a-f0-9]{7,40})?$/,
+    /^ls-files(?: --others)?(?: --modified)?(?: --exclude-standard)?$/,
+    /^stash(?: list)?$/,
+    /^config(?: --get)? [^\s]+$/,
+    /^remote -v$/,
+    /^tag$/,
+    /^fetch(?: [^\s]+)?$/
   ]
 
   if (!allowedCommandPatterns.some(pattern => pattern.test(commandString))) {
@@ -142,12 +135,6 @@ function executeGitCommandUtility (gitArgsArray, executionCwd, projectRoot) {
   return execSync(`git ${commandString}`, { cwd: absoluteExecutionCwd, encoding: 'utf8' });
 }
 
-/**
- * Create directory and parent directories if needed
- * @param {string} dirPath - Directory path to create
- * @param {string} projectRoot - Root directory to validate against
- * @returns {Object} - Success message
- */
 function createDirectory (dirPath, projectRoot) {
   if (!dirPath) {
     throw new McpError(ErrorCode.InvalidParams, 'Directory path is required');
@@ -157,7 +144,6 @@ function createDirectory (dirPath, projectRoot) {
     ? dirPath
     : path.resolve(projectRoot, dirPath);
 
-  // Validate the path is within project root
   if (!absolutePath.startsWith(projectRoot)) {
     throw new McpError(ErrorCode.PermissionDenied, 'Cannot create directory outside project root');
   }
@@ -175,12 +161,6 @@ function createDirectory (dirPath, projectRoot) {
   }
 }
 
-/**
- * Create empty file (touch)
- * @param {string} filePath - File path to create
- * @param {string} projectRoot - Root directory to validate against
- * @returns {Object} - Success message
- */
 function touchFile (filePath, projectRoot) {
   if (!filePath) {
     throw new McpError(ErrorCode.InvalidParams, 'File path is required');
@@ -190,25 +170,20 @@ function touchFile (filePath, projectRoot) {
     ? filePath
     : path.resolve(projectRoot, filePath);
 
-  // Validate the path is within project root
   if (!absolutePath.startsWith(projectRoot)) {
     throw new McpError(ErrorCode.PermissionDenied, 'Cannot create file outside project root');
   }
 
   try {
-    // First ensure the directory exists
     const dirPath = path.dirname(absolutePath);
     fs.ensureDirSync(dirPath);
 
-    // Create or update the file's timestamp (equivalent to Unix touch)
     const fileExists = fs.existsSync(absolutePath);
 
     if (fileExists) {
-      // Update the file's access and modification times
       const now = new Date();
       fs.utimesSync(absolutePath, now, now);
     } else {
-      // Create an empty file
       fs.writeFileSync(absolutePath, '', 'utf8');
     }
 
@@ -225,30 +200,14 @@ function touchFile (filePath, projectRoot) {
   }
 }
 
-/**
- * Enhanced version of listLocalFiles that adds a hint for LLM
- * @param {string} directoryPath - Directory to list
- * @param {boolean} recursive - Whether to list recursively
- * @param {string} projectRoot - Root directory to validate against
- * @param {Array<string>} ignore - Patterns to ignore
- * @returns {Object} - List of files with LLM hint
- */
-function enhanceListResults (originalResults, projectRoot) {
-  // Add the LLM hint to the original results
-  return {
-    ...originalResults,
-    llmHint: `You can browse other directories using 'list_local_files' or create/modify files using 'mkdir', 'touch', or 'write_local_file_content'. The current root directory is ${projectRoot}.`
-  };
-}
-
-// --- Express App Setup ---
+// --- Express App Setup (HTTP Mode) ---
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const mcpAuthMiddleware = (req, res, next) => {
   if (req.path === '/status' && req.method === 'GET') return next();
-  if (!currentApiKey) { // currentApiKey is for authenticating TO this local agent's HTTP server
+  if (!currentApiKey) {
     console.warn(chalk.yellow("[HTTP MCP] Warning: API key not configured for server. MCP endpoints protected."));
     return res.status(503).json({ error: 'Server not configured with API key.' });
   }
@@ -265,97 +224,55 @@ app.post('/mcp/:toolName', async (req, res) => {
   const args = req.body || {};
   console.log(chalk.cyan(`[HTTP MCP] Received request for tool: ${toolName} with args:`), args);
 
-  if (toolName.startsWith('remote_')) {
-    const config = readConfig();
-    const supabaseUrl = config.supabaseUrl;
-    const remoteApiKey = config.devflowApiKeyRemote; // Key for authenticating TO Supabase Gateway
-
-    if (!supabaseUrl || !remoteApiKey) {
-      console.error(chalk.red(`[HTTP MCP] Remote tool "${toolName}" called, but agent not configured for remote access.`));
-      return res.status(503).json({ error: `Local agent not configured for remote access. Missing supabaseUrl or devflowApiKeyRemote in config. Run 'devflow-local-agent configure'.` });
+  // Only handle local tools - remove remote tool support for now
+  try {
+    let result;
+    switch (toolName) {
+      case 'get_local_file_content':
+        if (!args.filePath) return res.status(400).json({ error: 'Missing required argument: filePath' });
+        result = getFileContent(args.filePath, currentProjectRoot);
+        break;
+      case 'write_local_file_content':
+        if (!args.filePath) return res.status(400).json({ error: 'Missing required argument: filePath' });
+        if (typeof args.content !== 'string') return res.status(400).json({ error: 'Missing or invalid required argument: content (must be a string)' });
+        result = writeLocalFileContent(args.filePath, args.content, currentProjectRoot);
+        break;
+      case 'list_local_files':
+        if (!args.directoryPath) return res.status(400).json({ error: 'Missing required argument: directoryPath' });
+        result = listLocalFiles(args.directoryPath, args.recursive, currentProjectRoot, args.ignore);
+        break;
+      case 'execute_git_command':
+        if (!args.command_args || !Array.isArray(args.command_args)) return res.status(400).json({ error: 'Missing or invalid required argument: command_args (must be an array)' });
+        result = { output: executeGitCommandUtility(args.command_args, currentProjectRoot, currentProjectRoot).trim() };
+        break;
+      case 'mkdir':
+        if (!args.dirPath) return res.status(400).json({ error: 'Missing required argument: dirPath' });
+        result = createDirectory(args.dirPath, currentProjectRoot);
+        break;
+      case 'touch':
+        if (!args.filePath) return res.status(400).json({ error: 'Missing required argument: filePath' });
+        result = touchFile(args.filePath, currentProjectRoot);
+        break;
+      default:
+        return res.status(404).json({ error: `Tool "${toolName}" not found.` });
     }
-
-    const actualToolName = toolName.substring('remote_'.length);
-    const mcpGatewayUrl = `${supabaseUrl}/functions/v1/mcp-gateway`;
-    const payload = { tool_name: actualToolName, arguments: args };
-
-    try {
-      console.log(chalk.blue(`[HTTP MCP] Proxying remote tool call "${actualToolName}" to ${mcpGatewayUrl}`));
-      const response = await fetch(mcpGatewayUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-DevFlow-API-Key': remoteApiKey },
-        body: JSON.stringify(payload)
-      });
-
-      let responseBody;
-      try {
-        responseBody = await response.json();
-      } catch (e) {
-        const textBody = await response.text();
-        console.error(chalk.red(`[HTTP MCP] Failed to parse JSON response from remote gateway for tool "${actualToolName}". Status: ${response.status}. Body: ${textBody}`));
-        if (!response.ok) {
-          return res.status(response.status || 502).json({ error: `Remote tool "${actualToolName}" failed with status ${response.status}. Response: ${textBody}` });
-        }
-        console.warn(chalk.yellow(`[HTTP MCP] Remote gateway response for "${actualToolName}" was OK but not valid JSON, returning as text.`));
-        return res.status(200).json({ result: textBody });
-      }
-
-      if (!response.ok) {
-        console.error(chalk.red(`[HTTP MCP] Error from remote gateway for tool "${actualToolName}": ${response.status}`), responseBody);
-        const errorMessage = responseBody?.error || `Remote gateway returned status ${response.status}`;
-        return res.status(response.status || 502).json({ error: `Remote tool "${actualToolName}" failed: ${errorMessage}` });
-      }
-
-      if (typeof responseBody.result === 'undefined') {
-        console.warn(chalk.yellow(`[HTTP MCP] Remote gateway response for "${actualToolName}" missing 'result' field. Returning raw response.`), responseBody);
-        return res.status(200).json(responseBody);
-      }
-      console.log(chalk.green(`[HTTP MCP] Successfully proxied remote tool call "${actualToolName}".`));
-      return res.status(200).json({ result: responseBody.result });
-    } catch (error) {
-      console.error(chalk.red(`[HTTP MCP] Network error calling remote tool "${actualToolName}":`), error);
-      return res.status(502).json({ error: `Failed to call remote tool "${actualToolName}": ${error.message}` });
-    }
-  } else { // Handle Local Tool Calls
-    try {
-      let result;
-      switch (toolName) {
-        case 'get_local_file_content':
-          if (!args.filePath) return res.status(400).json({ error: 'Missing required argument: filePath' });
-          result = getFileContent(args.filePath, currentProjectRoot);
-          break;
-        case 'write_local_file_content':
-          if (!args.filePath) return res.status(400).json({ error: 'Missing required argument: filePath' });
-          if (typeof args.content !== 'string') return res.status(400).json({ error: 'Missing or invalid required argument: content (must be a string)' });
-          result = writeLocalFileContent(args.filePath, args.content, currentProjectRoot);
-          break;
-        case 'list_local_files':
-          if (!args.directoryPath) return res.status(400).json({ error: 'Missing required argument: directoryPath' });
-          result = listLocalFiles(args.directoryPath, args.recursive, currentProjectRoot, args.ignore);
-          break;
-        case 'execute_git_command':
-          if (!args.command_args || !Array.isArray(args.command_args)) return res.status(400).json({ error: 'Missing or invalid required argument: command_args (must be an array)' });
-          result = { output: executeGitCommandUtility(args.command_args, currentProjectRoot, currentProjectRoot).trim() };
-          break;
-        default:
-          return res.status(404).json({ error: `Tool "${toolName}" not found.` });
-      }
-      res.status(200).json({ result });
-    } catch (error) {
-      console.error(chalk.red(`[HTTP MCP] Error executing local tool ${toolName}:`), stripAnsi(error.message));
-      let statusCode = 500;
-      if (error.message.includes('not found')) statusCode = 404;
-      if (error.message.includes('Access denied')) statusCode = 403;
-      res.status(statusCode).json({ error: stripAnsi(error.message) });
-    }
+    res.status(200).json({ result });
+  } catch (error) {
+    console.error(chalk.red(`[HTTP MCP] Error executing local tool ${toolName}:`), stripAnsi(error.message));
+    let statusCode = 500;
+    if (error.message.includes('not found')) statusCode = 404;
+    if (error.message.includes('Access denied')) statusCode = 403;
+    res.status(statusCode).json({ error: stripAnsi(error.message) });
   }
 });
 
 app.get('/status', (req, res) => {
   res.json({
-    status: 'active', timestamp: new Date().toISOString(),
+    status: 'active',
+    timestamp: new Date().toISOString(),
     message: "DevFlow AI Local Agent MCP Server is active.",
-    projectRoot: currentProjectRoot, port: PORT
+    projectRoot: currentProjectRoot,
+    port: process.env.PORT || DEFAULT_PORT
   });
 });
 
@@ -366,33 +283,38 @@ program
   .version(packageJson.version)
   .description('Local agent CLI for DevFlow AI.')
   .option('-p, --port <port_number>', 'Port for the MCP server', process.env.DEVFLOW_LOCAL_AGENT_PORT || savedConfig.port || DEFAULT_PORT.toString())
-  .option('-k, --api-key <key>', 'API key for authenticating clients TO this Local Agent', process.env.DEVFLOW_LOCAL_AGENT_API_KEY || savedConfig.apiKey)
-  .option('-r, --root <path>', 'Project root directory for local operations', process.env.DEVFLOW_LOCAL_AGENT_PROJECT_ROOT || savedConfig.root || INITIAL_CWD);
+  .option('-k, --api-key <key>', 'API key for authenticating clients TO this Local Agent', process.env.DEVFLOW_LOCAL_AGENT_API_KEY || savedConfig.apiKey);
 
 const startServerAction = (options) => {
   const globalOpts = program.opts();
-  PORT = parseInt(options.port || globalOpts.port, 10);
-  currentApiKey = options.apiKey || globalOpts.apiKey; // Key for this agent's HTTP server
-  currentProjectRoot = path.resolve(options.root || globalOpts.root);
+  const PORT = parseInt(options.port || globalOpts.port, 10);
+  currentApiKey = options.apiKey || globalOpts.apiKey;
+  currentProjectRoot = INITIAL_CWD; // Always use the directory where command was run
 
-  if (isNaN(PORT)) { console.error(chalk.red('Error: Invalid port number.')); process.exit(1); }
-  if (!currentApiKey) { console.error(chalk.red('Error: API Key for this Local Agent is required. Use --api-key, DEVFLOW_LOCAL_AGENT_API_KEY, or configure.')); process.exit(1); }
+  if (isNaN(PORT)) {
+    console.error(chalk.red('Error: Invalid port number.'));
+    process.exit(1);
+  }
+  if (!currentApiKey) {
+    console.error(chalk.red('Error: API Key for this Local Agent is required. Use --api-key, DEVFLOW_LOCAL_AGENT_API_KEY, or configure.'));
+    process.exit(1);
+  }
+
   try {
     if (!fs.existsSync(currentProjectRoot) || !fs.lstatSync(currentProjectRoot).isDirectory()) {
-      console.error(chalk.red(`Error: Project root "${currentProjectRoot}" is not a valid directory.`)); process.exit(1);
+      console.error(chalk.red(`Error: Project root "${currentProjectRoot}" is not a valid directory.`));
+      process.exit(1);
     }
-  } catch (error) { console.error(chalk.red(`Error with project root "${currentProjectRoot}":`), error.message); process.exit(1); }
+  } catch (error) {
+    console.error(chalk.red(`Error with project root "${currentProjectRoot}":`), error.message);
+    process.exit(1);
+  }
 
   console.log(chalk.blue(`Project root set to: ${currentProjectRoot}`));
   app.listen(PORT, () => {
     console.log(chalk.green.bold(`DevFlow AI Local Agent MCP HTTP Server started on http://localhost:${PORT}`));
     console.log(chalk.blue('Local Agent API Key Loaded. MCP Endpoints require X-DevFlow-API-Key header.'));
-    const remoteConfig = readConfig();
-    if (remoteConfig.supabaseUrl && remoteConfig.devflowApiKeyRemote) {
-      console.log(chalk.blue('Remote Supabase Gateway access is configured.'));
-    } else {
-      console.log(chalk.yellow('Remote Supabase Gateway access is NOT configured. Proxy tools (remote_*) will not work. Run "devflow-local-agent configure".'));
-    }
+    console.log(chalk.yellow('Remote Supabase Gateway access is DISABLED (will be fixed in future).'));
   });
 };
 
@@ -405,7 +327,7 @@ program.command('hello').action(() => console.log(chalk.magenta.bold('Hello from
 
 program
   .command('configure')
-  .description('Configure Local Agent settings, including remote Supabase Gateway access.')
+  .description('Configure Local Agent settings.')
   .action(async () => {
     const currentConfig = readConfig();
     console.log(chalk.blue('Current configuration:'), currentConfig);
@@ -421,324 +343,193 @@ program
         message: 'Enter default port for this Local Agent MCP server:',
         default: currentConfig.port || DEFAULT_PORT.toString(),
         validate: v => { const p = parseInt(v, 10); return (!isNaN(p) && p > 0 && p < 65536) ? true : 'Please enter a valid port number (1-65535).'; }
-      },
-      {
-        type: 'input', name: 'root',
-        message: 'Enter default project root path for local operations (absolute path, leave empty for CWD):',
-        default: currentConfig.root || ''
-      },
-      {
-        type: 'input', name: 'supabaseUrl',
-        message: 'Enter Supabase instance URL (for remote tools, e.g., http://localhost:54321 or https://<ref>.supabase.co):',
-        default: currentConfig.supabaseUrl || DEFAULT_SUPABASE_URL,
-        validate: v => (v && v.startsWith('http')) ? true : 'Please enter a valid URL starting with http:// or https://.'
-      },
-      // {
-      //   type: 'password', name: 'devflowApiKeyRemote',
-      //   message: 'Enter DevFlow API Key (from web UI) for authenticating *to* the Supabase MCP Gateway (for remote tools):',
-      //   default: currentConfig.devflowApiKeyRemote, mask: '*',
-      //   validate: v => true // Allow empty
-      // },
+      }
     ];
     try {
       const answers = await inquirer.prompt(questions);
       const newConfig = {
         apiKey: answers.apiKey,
-        port: parseInt(answers.port, 10),
-        root: answers.root.trim() === '' ? undefined : path.resolve(answers.root.trim()),
-        supabaseUrl: answers.supabaseUrl.trim(),
-        devflowApiKeyRemote: answers.apiKey, // Use the same API key for remote access
+        port: parseInt(answers.port, 10)
       };
-      if (!newConfig.root) delete newConfig.root;
-      // Ensure devflowApiKeyRemote is handled correctly if apiKey is empty (though validated)
-      if (!newConfig.devflowApiKeyRemote) {
-        delete newConfig.devflowApiKeyRemote;
-      }
-
-      if (newConfig.supabaseUrl === '') {
-        delete newConfig.supabaseUrl;
-      } else if (!newConfig.supabaseUrl) {
-        delete newConfig.supabaseUrl;
-      }
-
       writeConfig(newConfig);
-    } catch (error) { console.error(chalk.red('Failed to save configuration:'), error.message); }
+    } catch (error) {
+      console.error(chalk.red('Failed to save configuration:'), error.message);
+    }
   });
 
 // --- Stdio MCP Server Setup ---
 const startStdioMcpServerAction = async () => {
-  // Ensure only one instance is running
-  if (checkAgentRunning()) {
-    const lockInfo = getLockInfo();
-    console.error(chalk.red(`DevFlow Agent is already running (PID: ${lockInfo.pid}, Mode: ${lockInfo.mode})`));
-    console.error(chalk.yellow('Use `devflow-local-agent stop` to stop the running agent first.'));
-    process.exit(1);
-  }
   const hostApiKey = process.env.DEVFLOW_API_KEY;
   const maxRoot = process.env.DEVFLOW_MAX_ROOT ? path.resolve(process.env.DEVFLOW_MAX_ROOT) : null;
 
-  if (!hostApiKey) { console.error(chalk.red('Error: DEVFLOW_API_KEY env var is required for stdio MCP mode.')); process.exit(1); }
-  if (maxRoot && (!fs.existsSync(maxRoot) || !fs.lstatSync(maxRoot).isDirectory())) {
-    console.error(chalk.red(`Error: DEVFLOW_MAX_ROOT "${maxRoot}" is not a valid directory.`)); process.exit(1);
+  // If DEVFLOW_PROJECT_ROOT is set, use that; otherwise use maxRoot as fallback
+  let workingProjectRoot = process.env.DEVFLOW_PROJECT_ROOT ?
+    path.resolve(process.env.DEVFLOW_PROJECT_ROOT) :
+    (maxRoot || INITIAL_CWD);
+
+  if (!hostApiKey) {
+    console.error(chalk.red('Error: DEVFLOW_API_KEY env var is required for stdio MCP mode.'));
+    process.exit(1);
   }
 
-  const mcpServer = new McpServer({ name: 'devflow-local-agent-mcp', version: packageJson.version }, { capabilities: { tools: {} } });
+  // Validate maxRoot if provided
+  if (maxRoot && (!fs.existsSync(maxRoot) || !fs.lstatSync(maxRoot).isDirectory())) {
+    console.error(chalk.red(`Error: DEVFLOW_MAX_ROOT "${maxRoot}" is not a valid directory.`));
+    process.exit(1);
+  }
 
+  // Validate that working directory exists and is within maxRoot if specified
+  if (!fs.existsSync(workingProjectRoot) || !fs.lstatSync(workingProjectRoot).isDirectory()) {
+    console.error(chalk.red(`Error: Working directory "${workingProjectRoot}" is not a valid directory.`));
+    process.exit(1);
+  }
+
+  if (maxRoot && !workingProjectRoot.startsWith(maxRoot)) {
+    console.error(chalk.red(`Error: Working directory "${workingProjectRoot}" is outside DEVFLOW_MAX_ROOT "${maxRoot}".`));
+    console.error(chalk.yellow(`Tip: Set DEVFLOW_PROJECT_ROOT environment variable to specify the working directory.`));
+    process.exit(1);
+  }
+
+  const mcpServer = new McpServer(
+    { name: 'devflow-local-agent-mcp', version: packageJson.version },
+    { capabilities: { tools: {} } }
+  );
+
+  // Only define local tools - no remote tools
   const localTools = [
     {
       name: 'get_local_file_content',
-      description: 'Reads the content of a file from the local filesystem, relative to a specified project root.',
+      description: 'Reads the content of a file from the local filesystem, relative to the current working directory.',
       inputSchema: {
         type: 'object',
         properties: {
-          projectRoot: { type: 'string', description: 'Absolute path to the project root directory.' },
-          filePath: { type: 'string', description: 'Path to the file, relative to projectRoot.' },
+          filePath: { type: 'string', description: 'Path to the file, relative to current working directory.' },
         },
-        required: ['projectRoot', 'filePath'],
+        required: ['filePath'],
       },
     },
     {
       name: 'write_local_file_content',
-      description: 'Writes content to a file on the local filesystem, relative to a specified project root.',
+      description: 'Writes content to a file on the local filesystem, relative to the current working directory.',
       inputSchema: {
         type: 'object',
         properties: {
-          projectRoot: { type: 'string', description: 'Absolute path to the project root directory.' },
-          filePath: { type: 'string', description: 'Path to the file, relative to projectRoot.' },
+          filePath: { type: 'string', description: 'Path to the file, relative to current working directory.' },
           content: { type: 'string', description: 'The content to write to the file.' },
         },
-        required: ['projectRoot', 'filePath', 'content'],
+        required: ['filePath', 'content'],
       },
     },
     {
       name: 'list_local_files',
-      description: 'Lists files and directories within a path, relative to a specified project root.',
+      description: 'Lists files and directories within a path, relative to the current working directory.',
       inputSchema: {
         type: 'object',
         properties: {
-          projectRoot: { type: 'string', description: 'Absolute path to the project root directory.' },
-          directoryPath: { type: 'string', description: 'Path to the directory to list, relative to projectRoot.' },
+          directoryPath: { type: 'string', description: 'Path to the directory to list, relative to current working directory.' },
           recursive: { type: 'boolean', default: false, description: 'Whether to list files recursively.' },
           ignore: { type: 'array', items: { type: 'string' }, description: 'Array of patterns to ignore.' },
         },
-        required: ['projectRoot', 'directoryPath'],
+        required: ['directoryPath'],
       },
     },
     {
       name: 'execute_git_command',
-      description: 'Executes a Git command within a specified execution CWD, sandboxed by a project root.',
+      description: 'Executes a Git command within the current working directory.',
       inputSchema: {
         type: 'object',
         properties: {
-          projectRoot: { type: 'string', description: 'Absolute path to the overall project root (sandbox).' },
-          executionCwd: { type: 'string', default: '.', description: 'Path where the git command should execute, relative to projectRoot.' },
+          executionCwd: { type: 'string', default: '.', description: 'Path where the git command should execute, relative to current working directory.' },
           command_args: { type: 'array', items: { type: 'string' }, description: 'Array of arguments for the git command (e.g., ["status"]).' },
         },
-        required: ['projectRoot', 'command_args'],
-      },
-    },
-    { name: 'mkdir', description: 'Creates a directory and any necessary parent directories' },
-    { name: 'touch', description: 'Creates a new empty file or updates the timestamp of an existing file' }
-  ];
-  const remoteTools = [
-    {
-      name: 'remote_list_projects',
-      description: 'Lists projects from the DevFlow AI backend.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          github_org_id: { type: ['integer', 'null'], description: 'Optional GitHub organization ID to filter projects.' }
-        },
-        required: [],
+        required: ['command_args'],
       },
     },
     {
-      name: 'remote_get_project_details',
-      description: 'Gets details for a specific project from the DevFlow AI backend.',
+      name: 'mkdir',
+      description: 'Creates a directory and any necessary parent directories',
       inputSchema: {
         type: 'object',
         properties: {
-          project_id: { type: 'string', format: 'uuid', description: 'The UUID of the project.' }
+          dirPath: { type: 'string', description: 'Path to the directory to create, relative to current working directory.' },
         },
-        required: ['project_id'],
+        required: ['dirPath'],
       },
     },
     {
-      name: 'remote_list_tasks',
-      description: 'Lists tasks for a specific project from the DevFlow AI backend.',
+      name: 'touch',
+      description: 'Creates a new empty file or updates the timestamp of an existing file',
       inputSchema: {
         type: 'object',
         properties: {
-          project_id: { type: 'string', format: 'uuid', description: 'The UUID of the project.' },
-          status_filter: { type: 'array', items: { type: 'string' }, description: 'Optional array of statuses to filter tasks by.' },
-          scoped_path_id: { type: ['integer', 'null'], description: 'Optional scoped path ID to filter tasks by.' }
+          filePath: { type: 'string', description: 'Path to the file to create/touch, relative to current working directory.' },
         },
-        required: ['project_id'],
+        required: ['filePath'],
       },
-    },
-    {
-      name: 'remote_get_task_details',
-      description: 'Gets details for a specific task from the DevFlow AI backend.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          task_id: { type: 'string', format: 'uuid', description: 'The UUID of the task.' }
-        },
-        required: ['task_id'],
-      },
-    },
-    {
-      name: 'remote_create_project',
-      description: 'Creates a new project in the DevFlow AI backend.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          projectName: { type: 'string', description: 'Name of the new project.' },
-          githubRepoURL: { type: ['string', 'null'], description: 'Optional URL of the associated GitHub repository.' },
-          description: { type: ['string', 'null'], description: 'Optional project description.' },
-          guidelines: { type: ['string', 'null'], description: 'Optional project guidelines text.' },
-          github_org_id: { type: ['integer', 'null'], description: 'Optional GitHub organization ID.' },
-          github_org_login: { type: ['string', 'null'], description: 'Optional GitHub organization login name.' }
-        },
-        required: ['projectName'],
-      },
-    },
-    {
-      name: 'remote_create_task',
-      description: 'Creates a new task within a project in the DevFlow AI backend.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          project_id: { type: 'string', format: 'uuid', description: 'The UUID of the project.' },
-          title: { type: 'string', description: 'Title of the new task.' },
-          description: { type: ['string', 'null'], description: 'Optional task description.' },
-          scoped_path_id: { type: ['integer', 'null'], description: 'Optional scoped path ID to associate.' },
-          status: { type: 'string', enum: ['Backlog', 'To Do', 'In Progress', 'In Review', 'Done'], default: 'Backlog', description: 'Initial status of the task.' }
-        },
-        required: ['project_id', 'title'],
-      },
-    },
-    {
-      name: 'remote_update_task_status',
-      description: 'Updates the status of a task in the DevFlow AI backend.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          task_id: { type: 'string', format: 'uuid', description: 'The UUID of the task.' },
-          new_status: { type: 'string', enum: ['Backlog', 'To Do', 'In Progress', 'In Review', 'Done'], description: 'The new status for the task.' },
-          current_branch: { type: ['string', 'null'], description: 'Optional associated git branch name.' },
-          pull_request_url: { type: ['string', 'null'], description: 'Optional URL of the associated pull request.' }
-        },
-        required: ['task_id', 'new_status'],
-      },
-    },
-    {
-      name: 'remote_add_comment_to_task',
-      description: 'Adds a comment to a task in the DevFlow AI backend.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          task_id: { type: 'string', format: 'uuid', description: 'The UUID of the task.' },
-          comment_text: { type: 'string', description: 'The text content of the comment.' },
-          author_display_name: { type: ['string', 'null'], description: 'Optional display name for the author (e.g., AI Assistant).' }
-        },
-        required: ['task_id', 'comment_text'],
-      },
-    },
+    }
   ];
 
-  mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...localTools, ...remoteTools] }));
+  mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: localTools }));
 
   mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
-    if (name.startsWith('remote_')) {
-      const config = readConfig();
-      const supabaseUrl = config.supabaseUrl;
-      const remoteApiKeyForGateway = config.devflowApiKeyRemote;
-      if (!supabaseUrl || !remoteApiKeyForGateway) throw new McpError(ErrorCode.ConfigurationError, `Local agent not configured for remote access. Run 'devflow-local-agent configure'.`);
-
-      const actualToolName = name.substring('remote_'.length);
-      const mcpGatewayUrl = `${supabaseUrl}/functions/v1/mcp-gateway`;
-      const payload = { tool_name: actualToolName, arguments: args || {} };
-
-      try {
-        console.error(chalk.blue(`[MCP Stdio] Proxying remote tool call "${actualToolName}" to ${mcpGatewayUrl}`));
-        const response = await fetch(mcpGatewayUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-DevFlow-API-Key': remoteApiKeyForGateway },
-          body: JSON.stringify(payload)
-        });
-
-        let responseBody;
-        try { responseBody = await response.json(); } catch (e) { responseBody = await response.text(); }
-
-        if (!response.ok) {
-          const errMsg = (typeof responseBody === 'object' && responseBody?.error) ? responseBody.error : (responseBody || `Remote gateway returned status ${response.status}`);
-          throw new McpError(ErrorCode.InternalError, `Remote tool "${actualToolName}" failed: ${errMsg}`);
-        }
-        if (typeof responseBody.result === 'undefined') {
-          return { content: [{ type: 'text', text: JSON.stringify(responseBody) }] };
-        }
-        return { content: [{ type: 'text', text: JSON.stringify(responseBody.result) }] };
-      } catch (error) {
-        if (error instanceof McpError) throw error;
-        throw new McpError(ErrorCode.NetworkError, `Failed to call remote tool "${actualToolName}": ${error.message}`);
+    try {
+      let result;
+      switch (name) {
+        case 'get_local_file_content':
+          result = getFileContent(args.filePath, workingProjectRoot);
+          break;
+        case 'write_local_file_content':
+          result = writeLocalFileContent(args.filePath, args.content, workingProjectRoot);
+          break;
+        case 'execute_git_command':
+          result = { output: executeGitCommandUtility(args.command_args, args.executionCwd || '.', workingProjectRoot).trim() };
+          break;
+        case 'list_local_files':
+          result = listLocalFiles(args.directoryPath, args.recursive, workingProjectRoot, args.ignore);
+          break;
+        case 'mkdir':
+          result = createDirectory(args.dirPath, workingProjectRoot);
+          break;
+        case 'touch':
+          result = touchFile(args.filePath, workingProjectRoot);
+          break;
+        default:
+          throw new McpError(ErrorCode.MethodNotFound, `Tool "${name}" not found.`);
       }
-    } else { // Local tools
-      if (!args || typeof args !== 'object' || !args.projectRoot || typeof args.projectRoot !== 'string') {
-        if (localTools.some(lt => lt.name === name)) throw new McpError(ErrorCode.InvalidParams, `Local tool "${name}" requires "projectRoot" argument in Stdio mode.`);
-      }
-      const callProjectRoot = args.projectRoot ? path.resolve(args.projectRoot) : null;
-      if (callProjectRoot) {
-        if (!path.isAbsolute(callProjectRoot)) throw new McpError(ErrorCode.InvalidParams, `"projectRoot" must be absolute.`);
-        if (maxRoot && !callProjectRoot.startsWith(maxRoot)) throw new McpError(ErrorCode.PermissionDenied, `projectRoot outside DEVFLOW_MAX_ROOT.`);
-        if (!fs.existsSync(callProjectRoot) || !fs.lstatSync(callProjectRoot).isDirectory()) throw new McpError(ErrorCode.InvalidParams, `projectRoot not a valid directory.`);
-      } else if (localTools.some(lt => lt.name === name)) {
-        throw new McpError(ErrorCode.InvalidParams, `Local tool "${name}" requires "projectRoot" argument, but it was not provided or was invalid.`);
-      }
-
-      try {
-        let result;
-        switch (name) {
-          case 'get_local_file_content': result = getFileContent(args.filePath, callProjectRoot); break;
-          case 'write_local_file_content': result = writeLocalFileContent(args.filePath, args.content, callProjectRoot); break;
-          case 'execute_git_command': result = { output: executeGitCommandUtility(args.command_args, args.executionCwd || '.', callProjectRoot).trim() }; break;
-          case 'list_local_files':
-            const listResults = listLocalFiles(args.directoryPath, args.recursive, callProjectRoot, args.ignore);
-            result = enhanceListResults(listResults, callProjectRoot);
-            break;
-          case 'mkdir':
-            result = createDirectory(args.dirPath, callProjectRoot);
-            break;
-          case 'touch':
-            result = touchFile(args.filePath, callProjectRoot);
-            break;
-          default: throw new McpError(ErrorCode.MethodNotFound, `Tool "${name}" not found.`);
-        }
-        return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }] };
-      } catch (error) {
-        if (error instanceof McpError) throw error;
-        throw new McpError(ErrorCode.InternalError, stripAnsi(error.message));
-      }
+      return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }] };
+    } catch (error) {
+      if (error instanceof McpError) throw error;
+      throw new McpError(ErrorCode.InternalError, stripAnsi(error.message));
     }
   });
 
-  mcpServer.onerror = (error) => { console.error(chalk.red('[MCP Stdio Unhandled Error]'), error); };
-  process.on('SIGINT', async () => { await mcpServer.close(); process.exit(0); });
-  process.on('SIGTERM', async () => { await mcpServer.close(); process.exit(0); });
+  mcpServer.onerror = (error) => {
+    console.error(chalk.red('[MCP Stdio Error]'), error);
+  };
+
+  process.on('SIGINT', async () => {
+    await mcpServer.close();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', async () => {
+    await mcpServer.close();
+    process.exit(0);
+  });
 
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
+
   console.error(chalk.green.bold('DevFlow AI Local Agent running in Stdio MCP mode.'));
-  console.error(chalk.blue(`Host API Key loaded. DEVFLOW_MAX_ROOT: ${maxRoot || 'Not set'}`));
+  console.error(chalk.blue(`Working in project root: ${workingProjectRoot}`));
+  console.error(chalk.blue(`DEVFLOW_MAX_ROOT: ${maxRoot || 'Not set'}`));
 };
 
 program
   .command('mcp-stdio')
   .description('Starts the Local Agent in Stdio MCP mode for integration with MCP hosts.')
   .action(startStdioMcpServerAction);
-
-// Removed the 'find-empty-projects' command as its functionality is now part of the MCP tools.
 
 program.parse(process.argv);
