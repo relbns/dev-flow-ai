@@ -1,27 +1,20 @@
+// src/api.js
 import app from './index.js';
-import serverless from 'serverless-http';
 
-// Configure serverless handler
-const serverlessHandler = serverless(app, {
-  binary: ['image/png', 'image/jpeg', 'image/gif', 'application/pdf'],
-  provider: {
-    // Increase timeout to 10 seconds
-    timeout: 10
-  }
-});
-
-// Export the serverless handler
+// Simple handler for Vercel
 export default async (req, res) => {
-  try {
-    // Try to handle the request
-    return await serverlessHandler(req, res);
-  } catch (error) {
-    console.error('Serverless handler error:', error);
-    
-    // If there's an error, return a 500 response
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: process.env.NODE_ENV === 'production' ? 'Something went wrong' : error.message
+  // The app is already configured, so just run it as middleware
+  return new Promise((resolve, reject) => {
+    app(req, res, (err) => {
+      if (err) {
+        console.error('API handler error:', err);
+        res.status(500).json({
+          error: 'Internal Server Error',
+          message: process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.message
+        });
+        return reject(err);
+      }
+      resolve();
     });
-  }
+  });
 };

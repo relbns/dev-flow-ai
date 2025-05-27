@@ -6,28 +6,22 @@ import routes from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { corsMiddleware } from './middleware/corsMiddleware.js';
 import { connectToDatabase } from './utils/mongodb.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { createRateLimiters, ipDebugMiddleware } from './middleware/rateLimiter.js';
 
-// get __dirname in ESM
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+// Load environment variables
 dotenv.config();
 
+// Create Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
-// More permissive rate limiting for development
-// In production, these values should be lower
 const isDevelopment = process.env.NODE_ENV !== 'production';
+
+// Set trust proxy for Vercel
 app.set('trust proxy', true);
 
 // Middleware
 app.use(helmet({
-  // Disable contentSecurityPolicy for development
   contentSecurityPolicy: process.env.NODE_ENV === 'production',
-  // Allow server to be in an iframe for development tools
   frameguard: process.env.NODE_ENV === 'production' ? { action: 'deny' } : false
 }));
 
@@ -82,34 +76,30 @@ app.use(errorHandler);
 
 // Connect to MongoDB and start server in development
 // In production on Vercel, we don't need to call listen()
-const startServer = async () => {
+if (process.env.NODE_ENV !== 'production') {
   try {
-    // Only try to pre-connect to database in development
-    if (process.env.NODE_ENV !== 'production') {
-      try {
-        await connectToDatabase();
+    // Try to pre-connect to database in development
+    connectToDatabase()
+      .then(() => {
         console.log('Connected to MongoDB');
-      } catch (err) {
+      })
+      .catch(err => {
         console.warn('Warning: Could not connect to MongoDB:', err.message);
         console.warn('Server will still start, but API calls may fail');
-      }
-      
-      // Start the server in development mode
-      app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
-        console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-        console.log(`Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
       });
-    } else {
-      console.log('Running in production mode (serverless)');
-    }
+      
+    // Start the server in development mode
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
+    });
   } catch (err) {
     console.error('Failed to start server:', err);
     process.exit(1);
   }
-};
-
-// Start the server
-startServer();
+} else {
+  console.log('Running in production mode (serverless)');
+}
 
 export default app;

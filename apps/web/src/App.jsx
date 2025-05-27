@@ -1,5 +1,5 @@
 import React from 'react';
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
+import { createHashRouter, RouterProvider, Navigate } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import {
@@ -17,14 +17,20 @@ import {
 } from '@/pages/index.jsx';
 import './App.css';
 import { AuthProvider } from '@/hooks/useAuth';
+import AuthDebugPanel from '@/components/AuthDebugPanel';
+
+// Check if we're running on GitHub Pages
+const isGitHubPages = window.location.hostname.includes('github.io');
 
 // Get base path for GitHub Pages deployment
-const basePath = import.meta.env.PROD && window.location.hostname.includes('github.io') 
-  ? '/dev-flow-ai' 
-  : '';
+// For HashRouter, we don't need the basename for GitHub Pages
+const basePath = '';
 
-// Define router configuration
-const router = createBrowserRouter([
+console.log("[App] Environment:", import.meta.env.MODE);
+console.log("[App] Is GitHub Pages:", isGitHubPages);
+
+// Use HashRouter for GitHub Pages, BrowserRouter for other environments
+const router = createHashRouter([
   {
     path: '/',
     element: <Layout />,
@@ -104,16 +110,20 @@ const router = createBrowserRouter([
       },
     ],
   },
-], {
-  basename: basePath
-});
+]);
 
 // Export the function component as default
 const App = () => {
+  // Determine if we should show the debug panel
+  const showDebugPanel = import.meta.env.DEV || 
+                          localStorage.getItem('showDebug') === 'true' ||
+                          window.location.search.includes('debug=true');
+  
   return (
     <React.StrictMode>
       <AuthProvider>
         <RouterProvider router={router} />
+        {showDebugPanel && <AuthDebugPanel />}
       </AuthProvider>
     </React.StrictMode>
   );

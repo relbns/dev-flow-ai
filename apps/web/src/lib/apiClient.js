@@ -541,13 +541,52 @@ export const apiClient = {
       // Clear any rate limiting before login
       clearRateLimitTracking();
       
-      // For GitHub Pages deployment, we need to use the full URL
+      // Determine the correct GitHub auth URL based on environment
+      let githubAuthUrl;
+      
       if (window.location.hostname.includes('github.io')) {
-        window.location.href = 'https://dev-flow-ai.vercel.app/auth/github/login';
+        // GitHub Pages deployment
+        githubAuthUrl = 'https://dev-flow-ai.vercel.app/api/auth/github/login';
+      } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        // Local development
+        const port = window.location.port;
+        githubAuthUrl = `http://localhost:${port}/api/auth/github/login`;
       } else {
-        // In local or direct Vercel deployment, we can use the relative URL
-        window.location.href = `${BASE_URL}/auth/github/login`;
+        // Production Vercel deployment or other environment
+        githubAuthUrl = `${window.location.origin}/api/auth/github/login`;
       }
+      
+      console.log('Redirecting to GitHub auth URL:', githubAuthUrl);
+      window.location.href = githubAuthUrl;
+    },
+    
+    // Get a direct GitHub OAuth URL without using the backend
+    getDirectGitHubAuthUrl: () => {
+      // GitHub OAuth parameters
+      const clientId = 'Ov23liGyrjPcmvI0QH2n'; // Your GitHub OAuth App client ID
+      
+      // Determine the correct redirect URI based on environment
+      let redirectUri;
+      
+      if (window.location.hostname.includes('github.io')) {
+        // GitHub Pages deployment with HashRouter
+        const repoName = window.location.pathname.split('/')[1]; // Get the repository name from the URL
+        redirectUri = `${window.location.origin}/${repoName}/#/auth/callback`;
+      } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        // Local development with HashRouter
+        const port = window.location.port;
+        redirectUri = `http://localhost:${port}/#/auth/callback`;
+      } else {
+        // Production Vercel deployment or other environment with HashRouter
+        redirectUri = `${window.location.origin}/#/auth/callback`;
+      }
+      
+      // Encode the redirect URI
+      const encodedRedirectUri = encodeURIComponent(redirectUri);
+      const scopes = encodeURIComponent('user:email read:user repo read:org');
+      
+      // Create the GitHub OAuth URL
+      return `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodedRedirectUri}&scope=${scopes}&prompt=consent`;
     },
     
     getProfile: async () => {

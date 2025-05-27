@@ -90,11 +90,15 @@ export const getGitHubAuthUrl = async () => {
  * Handles the GitHub login flow
  */
 export const handleGitHubLogin = () => {
+  console.log('GitHub login initiated');
   // If we're on GitHub Pages, use the absolute Vercel URL
   if (window.location.hostname.includes('github.io')) {
+    console.log('On GitHub Pages, redirecting to Vercel auth endpoint');
+    // Direct link to the GitHub OAuth authorization, bypassing our backend redirect
     window.location.href = 'https://dev-flow-ai.vercel.app/auth/github/login';
   } else {
     // Otherwise, use the relative path
+    console.log('Local environment, using relative API path');
     window.location.href = '/api/auth/github/login';
   }
 };

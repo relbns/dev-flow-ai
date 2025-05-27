@@ -1,38 +1,21 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "src/api.js",
-      "use": "@vercel/node",
-      "config": {
-        "maxDuration": 10,
-        "memory": 1024
-      }
-    },
-    {
-      "src": "api/health.js",
-      "use": "@vercel/node",
-      "config": {
-        "maxDuration": 1,
-        "memory": 128
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/health",
-      "dest": "/api/health.js"
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "/src/api.js"
-    },
-    {
-      "src": "/auth/github/login",
-      "dest": "/src/api.js"
-    }
+  "buildCommand": "npm install",
+  "outputDirectory": "api",
+  "rewrites": [
+    { "source": "/health", "destination": "/api/health.js" },
+    { "source": "/auth/github/login", "destination": "/api/auth/github-login.js" },
+    { "source": "/api/auth/github/login", "destination": "/api/auth/github-login.js" },
+    { "source": "/api/auth/github/callback", "destination": "/api/auth/github-callback.js" },
+    { "source": "/api/auth/profile", "destination": "/api/auth/profile.js" }
   ],
   "env": {
     "NODE_ENV": "production"
+  },
+  "functions": {
+    "api/**/*.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    }
   }
 }
