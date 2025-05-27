@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevFlow AI - OAuth Callback</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            text-align: center;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .content {
+            background: rgba(255,255,255,0.1);
+            padding: 40px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        h2 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+        }
+        p {
+            margin: 0;
+            opacity: 0.9;
+        }
+        .error {
+            background: rgba(220, 53, 69, 0.2);
+            border: 1px solid rgba(220, 53, 69, 0.5);
+            color: #ff6b7a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="content" id="content">
+            <div class="spinner" id="spinner"></div>
+            <h2 id="title">Completing Authentication...</h2>
+            <p id="message">Please wait while we redirect you back to the application.</p>
+        </div>
+    </div>
+    
+    <script>
+        // This script handles the GitHub OAuth callback for GitHub Pages deployment
+        console.log('OAuth callback page loaded');
+        console.log('Current URL:', window.location.href);
+        console.log('Pathname:', window.location.pathname);
+        console.log('Search:', window.location.search);
+        
+        // Extract parameters from the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        const error = urlParams.get('error');
+        const errorDescription = urlParams.get('error_description');
+        
+        console.log('OAuth parameters:', { 
+            hasCode: !!code, 
+            error, 
+            errorDescription,
+            allParams: Object.fromEntries(urlParams.entries())
+        });
+        
+        function showError(title, message) {
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('title').textContent = title;
+            document.getElementById('message').textContent = message;
+            document.getElementById('content').classList.add('error');
+        }
+        
+        function redirectToApp(params = '') {
+            // Get the base path (remove /auth/callback from the current path)
+            const basePath = window.location.pathname.replace(/\/auth\/callback\/?$/, '') || '/dev-flow-ai';
+            const targetUrl = `${window.location.origin}${basePath}/#/auth/callback${params}`;
+            
+            console.log('Redirecting to:', targetUrl);
+            window.location.href = targetUrl;
+        }
+        
+        // Wait a moment for visual feedback, then redirect
+        setTimeout(() => {
+            if (error) {
+                console.error('OAuth error:', error, errorDescription);
+                showError('Authentication Error', errorDescription || error);
+                // Still redirect after showing error briefly
+                setTimeout(() => {
+                    const errorParams = new URLSearchParams();
+                    errorParams.append('error', error);
+                    if (errorDescription) errorParams.append('error_description', errorDescription);
+                    redirectToApp(`?${errorParams.toString()}`);
+                }, 2000);
+            } else if (code) {
+                console.log('OAuth code received, redirecting to hash route');
+                redirectToApp(`?code=${code}`);
+            } else {
+                console.error('No code or error found in callback');
+                showError('Authentication Error', 'No authorization code received from GitHub');
+                setTimeout(() => {
+                    redirectToApp('?error=no_code');
+                }, 2000);
+            }
+        }, 500);
+    </script>
+</body>
+</html>
