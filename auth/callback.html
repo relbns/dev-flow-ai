@@ -72,11 +72,13 @@
         // Extract parameters from the URL
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
+        const token = urlParams.get('token');
         const error = urlParams.get('error');
         const errorDescription = urlParams.get('error_description');
         
         console.log('OAuth parameters:', { 
-            hasCode: !!code, 
+            hasCode: !!code,
+            hasToken: !!token, 
             error, 
             errorDescription,
             allParams: Object.fromEntries(urlParams.entries())
@@ -110,14 +112,17 @@
                     if (errorDescription) errorParams.append('error_description', errorDescription);
                     redirectToApp(`?${errorParams.toString()}`);
                 }, 2000);
+            } else if (token) {
+                console.log('OAuth token received, redirecting to hash route');
+                redirectToApp(`?token=${encodeURIComponent(token)}`);
             } else if (code) {
                 console.log('OAuth code received, redirecting to hash route');
                 redirectToApp(`?code=${code}`);
             } else {
-                console.error('No code or error found in callback');
-                showError('Authentication Error', 'No authorization code received from GitHub');
+                console.error('No code, token, or error found in callback');
+                showError('Authentication Error', 'No authorization data received from GitHub');
                 setTimeout(() => {
-                    redirectToApp('?error=no_code');
+                    redirectToApp('?error=no_auth_data');
                 }, 2000);
             }
         }, 500);
