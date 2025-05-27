@@ -14,10 +14,10 @@ import {
   User,
   Building,
   ChevronLeft,
-  LogIn,
   RefreshCw,
 } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
+import LoginButton from './LoginButton';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
@@ -84,10 +84,16 @@ const Header = ({
     }
   };
 
-  // Function to handle login with GitHub
-  const handleLoginWithGitHub = () => {
+  // Function to handle login with GitHub for org permissions
+  const handleRequestOrgPermissions = () => {
     try {
-      apiClient.auth.login();
+      // Use the same redirect URI as the main login button
+      const clientId = 'Ov23liGyrjPcmvI0QH2n';
+      const redirectUri = 'https://dev-flow-ai.vercel.app/api/auth/github/callback';
+      const scopes = 'user:email read:user repo read:org';
+      const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&prompt=consent`;
+      
+      window.location.href = githubAuthUrl;
     } catch (error) {
       toast({
         title: 'Login Error',
@@ -136,119 +142,134 @@ const Header = ({
         </div>
 
         <div className="flex items-center space-x-3">
-          {/* Context Switcher */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-2">
-                {contextType === 'personal' ? (
-                  <>
-                    <User className="h-4 w-4" />
-                    <span className="hidden sm:inline">Personal</span>
-                  </>
-                ) : (
-                  <>
-                    <Building className="h-4 w-4" />
-                    <span className="hidden sm:inline">
-                      {organization?.name}
-                    </span>
-                    <Badge
-                      variant="outline"
-                      className="ml-1 text-xs hidden sm:inline-flex"
+          {/* Context Switcher - KEEP THIS - it's important for org/personal project context */}
+          {!authLoading && user && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  {contextType === 'personal' ? (
+                    <>
+                      <User className="h-4 w-4" />
+                      <span className="hidden sm:inline">Personal</span>
+                    </>
+                  ) : (
+                    <>
+                      <Building className="h-4 w-4" />
+                      <span className="hidden sm:inline">
+                        {organization?.name || organization?.login}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className="ml-1 text-xs hidden sm:inline-flex"
+                      >
+                        Organization
+                      </Badge>
+                    </>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  className="cursor-pointer"
+                  onClick={() => onContextChange && onContextChange('personal')}
+                >
+                  <User className="mr-2 h-4 w-4" />
+                  <span>Personal</span>
+                </DropdownMenuItem>
+
+                <DropdownMenuSeparator />
+
+                <div className="text-sm px-2 py-1.5 text-muted-foreground">
+                  Organizations
+                </div>
+
+                {Array.isArray(organizations) && organizations.length > 0 ? (
+                  organizations.map((org) => (
+                    <DropdownMenuItem
+                      key={org.id}
+                      className="cursor-pointer"
+                      onClick={() => onContextChange && onContextChange('organization', { 
+                        id: org.id, 
+                        name: org.login, 
+                        login: org.login,
+                        avatar_url: org.avatar_url 
+                      })}
                     >
-                      Organization
-                    </Badge>
-                  </>
+                      <Building className="mr-2 h-4 w-4" />
+                      <span>{org.login}</span>
+                    </DropdownMenuItem>
+                  ))
+                ) : (
+                  <div className="text-sm px-2 py-1.5 text-muted-foreground italic">
+                    No organizations found
+                  </div>
                 )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                className="cursor-pointer"
-                onClick={() => onContextChange('personal')}
-              >
-                <User className="mr-2 h-4 w-4" />
-                <span>Personal</span>
-              </DropdownMenuItem>
 
-              <DropdownMenuSeparator />
+                {/* Add Request Permissions Item */}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="cursor-pointer text-muted-foreground"
+                  onClick={handleRequestOrgPermissions}
+                  disabled={loading}
+                >
+                  <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                  <span>Request Org Permissions</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
-              <div className="text-sm px-2 py-1.5 text-muted-foreground">
-                Organizations
-              </div>
-
-              {Array.isArray(organizations) &&
-                organizations.map((org) => (
-                  <DropdownMenuItem
-                    key={org.id}
-                    className="cursor-pointer"
-                    onClick={() => onContextChange('organization', { id: org.id, name: org.login, avatar_url: org.avatar_url })}
-                  >
-                    <Building className="mr-2 h-4 w-4" />
-                    <span>{org.login}</span>
-                  </DropdownMenuItem>
-                ))}
-
-              {/* Add Request Permissions Item */}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="cursor-pointer text-muted-foreground"
-                onClick={handleLoginWithGitHub}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                <span>Request Org Permissions</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Notifications */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="relative">
-                <Bell className="h-5 w-5" />
-                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full"></span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <div className="max-h-80 overflow-auto">
-                {[1, 2, 3].map((i) => (
-                  <DropdownMenuItem
-                    key={i}
-                    className="py-2 px-4 cursor-pointer"
-                    onClick={() =>
-                      toast({
-                        title: 'Notification clicked',
-                        description: 'This would navigate to the item.',
-                      })
-                    }
-                  >
-                    <div>
-                      <p className="text-sm font-medium">New task assigned</p>
-                      <p className="text-xs text-muted-foreground">
-                        Jane assigned you a task in API Project
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        2 hours ago
-                      </p>
-                    </div>
-                  </DropdownMenuItem>
-                ))}
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="cursor-pointer justify-center font-medium"
-                onClick={() => navigate('/notifications')}
-              >
-                View all notifications
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Notifications - only show if user is logged in */}
+          {!authLoading && user && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative">
+                  <Bell className="h-5 w-5" />
+                  <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full"></span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80">
+                <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <div className="max-h-80 overflow-auto">
+                  {[1, 2, 3].map((i) => (
+                    <DropdownMenuItem
+                      key={i}
+                      className="py-2 px-4 cursor-pointer"
+                      onClick={() =>
+                        toast({
+                          title: 'Notification clicked',
+                          description: 'This would navigate to the item.',
+                        })
+                      }
+                    >
+                      <div>
+                        <p className="text-sm font-medium">New task assigned</p>
+                        <p className="text-xs text-muted-foreground">
+                          Jane assigned you a task in API Project
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          2 hours ago
+                        </p>
+                      </div>
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="cursor-pointer justify-center font-medium"
+                  onClick={() => navigate('/notifications')}
+                >
+                  View all notifications
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           {/* Theme Toggle */}
           <ThemeToggle />
 
-          {/* User Menu / Login Button */}
+          {/* User Menu / Login Button - ONLY in header */}
           {!authLoading && (user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -276,15 +297,13 @@ const Header = ({
                   Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout}>
-                  Log out
+                <DropdownMenuItem onClick={handleLogout} disabled={loading}>
+                  {loading ? 'Logging out...' : 'Log out'}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Button variant="outline" onClick={handleLoginWithGitHub}>
-              <LogIn className="mr-2 h-4 w-4" /> Login with GitHub
-            </Button>
+            <LoginButton variant="outline" />
           ))}
         </div>
       </div>

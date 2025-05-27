@@ -1,9 +1,29 @@
 // src/components/LandingPage.jsx
 import React from 'react';
-import DirectLoginButton from './DirectLoginButton';
-import LoginDebug from './LoginDebug';
+import { Button } from '@/components/ui/button';
+import { useAuth } from '@/hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
 
 const LandingPage = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  // If user is already logged in, redirect to dashboard
+  React.useEffect(() => {
+    if (user) {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
+
+  const handleGetStarted = () => {
+    if (user) {
+      navigate('/dashboard');
+    } else {
+      // User needs to login via header
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
       <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
@@ -17,13 +37,23 @@ const LandingPage = () => {
             Streamline your development workflow with GitHub integration and AI-assisted task management.
           </p>
           
-          <DirectLoginButton />
+          <Button 
+            onClick={handleGetStarted}
+            size="lg" 
+            className="w-full"
+          >
+            {user ? 'Go to Dashboard' : 'Get Started'}
+          </Button>
           
-          <p className="mt-4 text-sm text-gray-500">
-            By logging in, you agree to our Terms of Service and Privacy Policy.
+          {!user && (
+            <p className="mt-4 text-sm text-gray-500 text-center">
+              Click "Login with GitHub" in the header to get started.
+            </p>
+          )}
+          
+          <p className="mt-4 text-sm text-gray-500 text-center">
+            By using DevFlow AI, you agree to our Terms of Service and Privacy Policy.
           </p>
-          
-          <LoginDebug />
         </div>
       </div>
     </div>

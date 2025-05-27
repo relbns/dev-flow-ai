@@ -15,7 +15,7 @@ export const AuthProvider = ({ children }) => {
       hasToken: !!localStorage.getItem('jwtToken'),
       userData: userData ? {
         id: userData.id,
-        username: userData.username
+        username: userData.username || userData.login
       } : null
     });
   };
@@ -41,14 +41,15 @@ export const AuthProvider = ({ children }) => {
             const payloadJson = atob(payloadBase64);
             const payload = JSON.parse(payloadJson);
             
-            if (payload.isTemp) {
+            // Try to extract user data from token payload
+            if (payload.githubId || payload.sub || payload.userId) {
               console.log("[Auth] Using user data from token");
               decodedUser = {
-                id: payload.githubId,
-                username: payload.username,
-                displayName: payload.displayName,
+                id: payload.githubId || payload.sub || payload.userId,
+                username: payload.username || payload.login,
+                displayName: payload.displayName || payload.name,
                 email: payload.email,
-                avatarUrl: payload.avatarUrl
+                avatarUrl: payload.avatarUrl || payload.avatar_url
               };
               
               // Set user immediately from token data
@@ -59,62 +60,46 @@ export const AuthProvider = ({ children }) => {
           console.warn("[Auth] Error decoding token:", decodeError);
         }
         
-        // Fetch user profile using apiClient
-        console.log("[Auth] Fetching user profile from API");
-        const response = await apiClient.auth.getProfile();
-        if (response && response.user) {
-          console.log("[Auth] Profile fetch successful, updating user");
-          setUser(response.user);
-          logAuthState("Profile loaded from API", response.user);
-        } else if (decodedUser) {
-          console.log("[Auth] Profile fetch returned no data, keeping token data");
-          // Keep the token data if API returned nothing
-          setUser(decodedUser);
-          logAuthState("Using decoded token data", decodedUser);
-        } else {
-          console.log("[Auth] No user data available, clearing token");
-          // If no user data from any source, clear token
-          localStorage.removeItem('jwtToken');
-          setUser(null);
+        // Try to fetch user profile using apiClient for complete data
+        try {
+          console.log("[Auth] Fetching user profile from API");
+          const response = await apiClient.auth.getProfile();
+          if (response && response.user) {
+            console.log("[Auth] Profile fetch successful, updating user");
+            setUser(response.user);
+            logAuthState("Profile loaded from API", response.user);
+          } else if (decodedUser) {
+            console.log("[Auth] Profile fetch returned no data, keeping token data");
+            // Keep the token data if API returned nothing
+            setUser(decodedUser);
+            logAuthState("Using decoded token data", decodedUser);
+          } else {
+            console.log("[Auth] No user data available, clearing token");
+            // If no user data from any source, clear token
+            localStorage.removeItem('jwtToken');
+            setUser(null);
+          }
+        } catch (profileError) {
+          console.warn('[Auth] Error fetching profile:', profileError);
+          
+          // If we have decoded user data, use it as fallback
+          if (decodedUser) {
+            console.log("[Auth] Using token data as fallback after profile error");
+            setUser(decodedUser);
+            logAuthState("Using token data after profile error", decodedUser);
+            setError(null); // Clear error since we have fallback data
+          } else {
+            console.log("[Auth] No fallback data, clearing token");
+            localStorage.removeItem('jwtToken');
+            setUser(null);
+            setError(profileError.message || 'Failed to load user profile');
+          }
         }
       } catch (error) {
-        console.error('[Auth] Error loading user:', error);
-        
-        // Try to use decoded user if API fails
-        let decodedUser = null;
-        try {
-          const tokenParts = token.split('.');
-          if (tokenParts.length === 3) {
-            const payloadBase64 = tokenParts[1];
-            const payloadJson = atob(payloadBase64);
-            const payload = JSON.parse(payloadJson);
-            
-            if (payload.isTemp || payload.githubId) {
-              console.log("[Auth] API failed, using token data as fallback");
-              decodedUser = {
-                id: payload.githubId || payload.userId,
-                username: payload.username,
-                displayName: payload.displayName,
-                email: payload.email,
-                avatarUrl: payload.avatarUrl
-              };
-              
-              // Set user from token data
-              setUser(decodedUser);
-              logAuthState("Using token data after API error", decodedUser);
-              setError(null);
-            }
-          }
-        } catch (decodeError) {
-          console.warn("[Auth] Error decoding token after API error:", decodeError);
-        }
-        
-        if (!decodedUser) {
-          // Clear invalid token if we couldn't get user data from any source
-          localStorage.removeItem('jwtToken');
-          setUser(null);
-          setError(error.message || 'Failed to load user profile');
-        }
+        console.error('[Auth] Error in loadUser:', error);
+        localStorage.removeItem('jwtToken');
+        setUser(null);
+        setError(error.message || 'Authentication error');
       } finally {
         setLoading(false);
       }
@@ -125,7 +110,11 @@ export const AuthProvider = ({ children }) => {
 
   // Function to update user state after login (called from AuthCallback)
   const login = (userData, token) => {
-    console.log("[Auth] Login called with userData:", !!userData);
+    console.log("[Auth] Login called", {
+      hasUserData: !!userData,
+      hasToken: !!token,
+      username: userData?.username || userData?.login
+    });
     
     if (token) {
       console.log("[Auth] Storing token in localStorage");
@@ -133,15 +122,13 @@ export const AuthProvider = ({ children }) => {
     }
     
     if (userData) {
-      console.log("[Auth] Setting user state with:", userData.username);
+      console.log("[Auth] Setting user state with:", userData.username || userData.login);
       setUser(userData);
       logAuthState("Login completed", userData);
+      setError(null); // Clear any previous errors
     } else {
       console.warn("[Auth] Login called without userData");
     }
-    
-    // Clear any previous errors
-    setError(null);
   };
 
   // Function to clear user state after logout (called from Header)
@@ -156,6 +143,7 @@ export const AuthProvider = ({ children }) => {
       // Always clear local state regardless of API errors
       localStorage.removeItem('jwtToken');
       setUser(null);
+      setError(null);
       logAuthState("Logged out", null);
     }
   };

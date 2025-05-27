@@ -406,23 +406,6 @@ export const apiClient = {
   
   // GitHub-related methods
   github: {
-    getAuthUrl: async () => {
-      const url = `${BASE_URL}/auth/github/login`;
-      
-      // Check if this endpoint is rate limited
-      if (isRateLimited(url)) {
-        throw new Error('This endpoint is currently rate limited. Please try again later.');
-      }
-      
-      try {
-        const response = await fetch(url);
-        return await handleApiResponse(response, url);
-      } catch (error) {
-        console.error('Error getting GitHub auth URL:', error);
-        throw error;
-      }
-    },
-    
     getOrganizations: async () => {
       const url = `${BASE_URL}/github/organizations`;
       
@@ -537,58 +520,6 @@ export const apiClient = {
   
   // Auth methods
   auth: {
-    login: async () => {
-      // Clear any rate limiting before login
-      clearRateLimitTracking();
-      
-      // Determine the correct GitHub auth URL based on environment
-      let githubAuthUrl;
-      
-      if (window.location.hostname.includes('github.io')) {
-        // GitHub Pages deployment
-        githubAuthUrl = 'https://dev-flow-ai.vercel.app/api/auth/github/login';
-      } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        // Local development
-        const port = window.location.port;
-        githubAuthUrl = `http://localhost:${port}/api/auth/github/login`;
-      } else {
-        // Production Vercel deployment or other environment
-        githubAuthUrl = `${window.location.origin}/api/auth/github/login`;
-      }
-      
-      console.log('Redirecting to GitHub auth URL:', githubAuthUrl);
-      window.location.href = githubAuthUrl;
-    },
-    
-    // Get a direct GitHub OAuth URL without using the backend
-    getDirectGitHubAuthUrl: () => {
-      // GitHub OAuth parameters
-      const clientId = 'Ov23liGyrjPcmvI0QH2n'; // Your GitHub OAuth App client ID
-      
-      // Determine the correct redirect URI based on environment
-      let redirectUri;
-      
-      if (window.location.hostname.includes('github.io')) {
-        // GitHub Pages deployment with HashRouter
-        const repoName = window.location.pathname.split('/')[1]; // Get the repository name from the URL
-        redirectUri = `${window.location.origin}/${repoName}/#/auth/callback`;
-      } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        // Local development with HashRouter
-        const port = window.location.port;
-        redirectUri = `http://localhost:${port}/#/auth/callback`;
-      } else {
-        // Production Vercel deployment or other environment with HashRouter
-        redirectUri = `${window.location.origin}/#/auth/callback`;
-      }
-      
-      // Encode the redirect URI
-      const encodedRedirectUri = encodeURIComponent(redirectUri);
-      const scopes = encodeURIComponent('user:email read:user repo read:org');
-      
-      // Create the GitHub OAuth URL
-      return `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodedRedirectUri}&scope=${scopes}&prompt=consent`;
-    },
-    
     getProfile: async () => {
       const token = getAuthToken();
       if (!token) {
@@ -711,9 +642,6 @@ export const backwardCompatClient = {
           if (options.body && options.body.project_id) {
             return { data: await apiClient.projects.update(options.body.project_id, options.body) };
           }
-        },
-        'github-auth': async () => {
-          return { data: { url: await apiClient.github.getAuthUrl() } };
         },
         'list-api-keys': async () => {
           return { data: await apiClient.apiKeys.list() };

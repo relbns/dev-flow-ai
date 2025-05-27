@@ -39,52 +39,141 @@ router.get('/github/login', (req, res) => {
     }
 });
 
-// Simplified GitHub callback that focuses on generating a token and redirecting quickly
-router.get('/github/callback', async (req, res) => {
+// Handle code exchange for token (for frontend AJAX requests)
+router.get('/github-callback', async (req, res) => {
     try {
-        console.log('GitHub callback received');
+        console.log('GitHub callback API endpoint received:', req.query);
         const { code } = req.query;
 
         if (!code) {
             console.error('No code provided in callback');
-            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-            return res.redirect(`${frontendUrl}/auth/callback?error=GitHub authorization code is required`);
+            return res.status(400).json({ error: 'GitHub authorization code is required' });
         }
 
+        console.log('Exchanging code for GitHub token...');
         // Exchange the code for access token
         const tokenData = await exchangeCodeForToken(code);
         
+        console.log('Getting GitHub user profile...');
         // Get user profile
         const profileData = await getGithubUserProfile(tokenData.accessToken);
         
-        // Generate a temporary token with just the GitHub data
-        // This avoids the database operation during the callback
-        const tempToken = jwt.sign(
+        console.log('Creating/updating user in database...');
+        // Create or update user in database
+        const user = await createOrUpdateUser(profileData, tokenData);
+        
+        // Generate JWT token
+        const jwtToken = jwt.sign(
             { 
-                githubId: profileData.githubId,
-                username: profileData.username,
-                displayName: profileData.displayName,
-                email: profileData.email,
-                avatarUrl: profileData.avatarUrl,
-                // Include the GitHub token data for later persistence
-                githubToken: tokenData.accessToken,
-                githubRefreshToken: tokenData.refreshToken,
-                tokenExpiresIn: tokenData.expiresIn
+                _id: user._id,
+                githubId: user.githubId,
+                username: user.username,
+                displayName: user.displayName,
+                email: user.email,
+                avatarUrl: user.avatarUrl
             },
             process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
 
-        // Redirect to frontend immediately with the token
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        const redirectUrl = `${frontendUrl}/auth/callback?token=${encodeURIComponent(tempToken)}`;
-        console.log('Redirecting to:', redirectUrl);
+        console.log('Returning token and user data to frontend');
         
-        return res.redirect(redirectUrl);
+        // Return JSON response with token and user data
+        return res.json({
+            token: jwtToken,
+            user: {
+                id: user._id,
+                username: user.username,
+                displayName: user.displayName,
+                email: user.email,
+                avatarUrl: user.avatarUrl,
+                organizations: user.organizations || []
+            }
+        });
+    } catch (error) {
+        console.error('GitHub auth callback error:', error);
+        return res.status(500).json({ 
+            error: 'Authentication failed', 
+            message: error.message 
+        });
+    }
+});
+
+// GitHub callback that redirects to frontend (original OAuth flow)
+router.get('/github/callback', async (req, res) => {
+    try {
+        console.log('GitHub callback received at:', new Date().toISOString());
+        console.log('Query parameters:', req.query);
+        const { code, error: oauthError } = req.query;
+
+        // Determine frontend URL based on environment or referrer
+        let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        
+        // Check if the request came from GitHub Pages
+        const referer = req.headers.referer || req.headers.referrer;
+        console.log('Referer header:', referer);
+        
+        if (referer && referer.includes('github.io')) {
+            // Extract the GitHub Pages URL from the referer
+            const githubPagesMatch = referer.match(/(https:\/\/[^.]+\.github\.io\/[^\/]+)/);
+            if (githubPagesMatch) {
+                frontendUrl = githubPagesMatch[1];
+                console.log('Detected GitHub Pages frontend:', frontendUrl);
+            }
+        }
+
+        if (oauthError) {
+            console.error('OAuth error from GitHub:', oauthError);
+            return res.redirect(`${frontendUrl}/#/auth/callback?error=${encodeURIComponent(oauthError)}`);
+        }
+
+        if (!code) {
+            console.error('No code provided in callback');
+            return res.redirect(`${frontendUrl}/#/auth/callback?error=${encodeURIComponent('No authorization code received')}`);
+        }
+
+        try {
+            console.log('Exchanging code for token');
+            // Exchange the code for access token
+            const tokenData = await exchangeCodeForToken(code);
+            
+            console.log('Getting user profile');
+            // Get user profile
+            const profileData = await getGithubUserProfile(tokenData.accessToken);
+            
+            console.log('Creating/updating user');
+            // Create or update user in database
+            const user = await createOrUpdateUser(profileData, tokenData);
+            
+            // Generate JWT token
+            const jwtToken = jwt.sign(
+                { 
+                    _id: user._id,
+                    githubId: user.githubId,
+                    username: user.username,
+                    displayName: user.displayName,
+                    email: user.email,
+                    avatarUrl: user.avatarUrl
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            console.log('Redirecting to frontend with token');
+            
+            // Redirect to frontend with token
+            const redirectUrl = `${frontendUrl}/#/auth/callback?token=${encodeURIComponent(jwtToken)}`;
+            console.log('Redirect URL:', redirectUrl);
+            
+            return res.redirect(redirectUrl);
+        } catch (authError) {
+            console.error('Authentication processing error:', authError);
+            return res.redirect(`${frontendUrl}/#/auth/callback?error=${encodeURIComponent(authError.message)}`);
+        }
     } catch (error) {
         console.error('GitHub auth callback error:', error);
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        return res.redirect(`${frontendUrl}/auth/callback?error=${encodeURIComponent(error.message)}`);
+        return res.redirect(`${frontendUrl}/#/auth/callback?error=${encodeURIComponent('Authentication failed')}`);
     }
 });
 
